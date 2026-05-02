@@ -20,10 +20,6 @@ export class AppRouterReceiver implements Receiver {
   }
 
   async handle(req: Request): Promise<Response> {
-    if (!this.app) {
-      throw new Error("AppRouterReceiver not initialized — wire it via new App({ receiver })");
-    }
-
     const rawBody = await req.text();
     const ts = req.headers.get("x-slack-request-timestamp") ?? "";
     const sig = req.headers.get("x-slack-signature") ?? "";
@@ -47,6 +43,10 @@ export class AppRouterReceiver implements Receiver {
     ) {
       const challenge = (parsed as { challenge?: unknown }).challenge;
       return Response.json({ challenge: typeof challenge === "string" ? challenge : "" });
+    }
+
+    if (!this.app) {
+      throw new Error("AppRouterReceiver not initialized — wire it via new App({ receiver })");
     }
 
     let acked = false;
