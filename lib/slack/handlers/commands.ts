@@ -2,6 +2,7 @@ import type { App } from "@slack/bolt";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
+import { config } from "@/lib/config";
 
 const COMMAND_RE = {
   score: /\b(score|ranking|leaderboard)\b/i,
@@ -26,13 +27,43 @@ function formatScore(rows: { name: string; received: number }[]): string {
   return ["*Top taco receivers (lifetime)*", ...lines].join("\n");
 }
 
-async function dispatch(text: string, _userId: string): Promise<string | null> {
+const HELP_TEXT = `🌮 *Tacobot commands*
+• \`score\`/\`ranking\` — top 5 taco receivers
+• \`balance\`/\`wallet\` — what you can spend in the shop
+• \`left\`/\`how many\`/\`combien\` — tacos you have left to give today
+• \`shop\`/\`boutique\` — shop URL
+• \`help\`/\`aide\`/\`commandes\` — this message
+
+To give a taco, type \`@person :taco:\` in #taqueria, or react to their message with 🌮.`;
+
+async function dispatch(text: string, userId: string): Promise<string | null> {
   const t = text.trim();
   if (COMMAND_RE.score.test(t)) {
     const rows = await topReceivers();
     return formatScore(rows);
   }
-  // Other commands added in Task 27.
+  if (COMMAND_RE.left.test(t)) {
+    const [u] = await db
+      .select({ left: users.dailyRemaining })
+      .from(users)
+      .where(eq(users.id, userId));
+    if (!u) return `You have ${config.taco.dailyAllowance} tacos left to give today.`;
+    return `You have ${u.left} taco${u.left === 1 ? "" : "s"} left to give today.`;
+  }
+  if (COMMAND_RE.balance.test(t)) {
+    const [u] = await db
+      .select({ balance: users.balance })
+      .from(users)
+      .where(eq(users.id, userId));
+    const bal = u?.balance ?? 0;
+    return `You have ${bal} taco${bal === 1 ? "" : "s"} to spend. Browse the shop: ${config.shopUrl}`;
+  }
+  if (COMMAND_RE.shop.test(t)) {
+    return `Shop: ${config.shopUrl}`;
+  }
+  if (COMMAND_RE.help.test(t)) {
+    return HELP_TEXT;
+  }
   return null;
 }
 

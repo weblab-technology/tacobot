@@ -47,6 +47,46 @@ test("score returns top 5 by received_total, descending", async () => {
   });
 });
 
+test("left command reports caller's daily_remaining", async () => {
+  await withCleanDb(async (db) => {
+    await upsertUser(db, { id: "U_X", name: "X", dailyAllowance: 5 });
+    await db.execute(sql`UPDATE users SET daily_remaining = 3 WHERE id = 'U_X'`);
+    const reply = await __test.dispatch("how many", "U_X");
+    expect(reply).toContain("3");
+  });
+});
+
+test("balance command reports caller's balance", async () => {
+  await withCleanDb(async (db) => {
+    await upsertUser(db, { id: "U_X", name: "X", dailyAllowance: 5 });
+    await db.execute(sql`UPDATE users SET received_total = 7, balance = 7 WHERE id = 'U_X'`);
+    const reply = await __test.dispatch("balance", "U_X");
+    expect(reply).toContain("7 tacos to spend");
+  });
+});
+
+test("shop command returns the shop URL", async () => {
+  const reply = await __test.dispatch("shop", "U_X");
+  expect(reply).toContain("/shop");
+});
+
+test("help command returns the full help text", async () => {
+  const reply = await __test.dispatch("help", "U_X");
+  expect(reply).toContain("Tacobot commands");
+  expect(reply).toContain("score");
+  expect(reply).toContain("balance");
+});
+
+test("French synonyms work: aide, combien, boutique, commandes", async () => {
+  await withCleanDb(async (db) => {
+    await upsertUser(db, { id: "U_X", name: "X", dailyAllowance: 5 });
+    expect(await __test.dispatch("aide", "U_X")).toContain("Tacobot");
+    expect(await __test.dispatch("combien", "U_X")).toContain("today");
+    expect(await __test.dispatch("boutique", "U_X")).toContain("/shop");
+    expect(await __test.dispatch("commandes", "U_X")).toContain("Tacobot");
+  });
+});
+
 afterAll(async () => {
   await closePool();
 });
