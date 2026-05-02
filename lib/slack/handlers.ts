@@ -1,4 +1,4 @@
 import { boltApp } from "./bolt";
+import { registerMessageHandler } from "./handlers/message";
 
-// Handlers registered by subsequent phases.
-void boltApp;
+registerMessageHandler(boltApp);
