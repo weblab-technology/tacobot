@@ -105,6 +105,61 @@ export async function POST(req: Request) {
 The side-effect import of `handlers` registers all `app.event(...)` listeners
 once at module load.
 
+## Auth.js v5 Slack provider — verified pattern (2026-05-02)
+
+Notes from context7 lookup against `authjs_dev`.
+
+### Provider import
+
+```ts
+import NextAuth from "next-auth"
+import Slack from "next-auth/providers/slack"
+```
+
+### Slack OIDC profile shape
+
+Slack's OIDC provider returns:
+- `sub` — usually the Slack user ID (sometimes prefixed)
+- `email`, `name`, `picture` — standard OIDC claims
+- `https://slack.com/user_id` — the workspace-scoped Slack user ID (`U…`)
+- `https://slack.com/team_id` — the workspace ID
+- `https://slack.com/team_domain` — workspace subdomain
+
+The reliable allowlist key is `profile["https://slack.com/user_id"]`. Fall back to `profile.sub` if absent.
+
+### App Router config + handlers
+
+```ts
+export const { handlers, auth, signIn, signOut } = NextAuth({
+  providers: [Slack({ clientId, clientSecret })],
+  session: { strategy: "jwt" },
+  callbacks: {
+    async signIn({ profile }) { /* allowlist check */ },
+    async jwt({ token, profile }) { /* persist slackUserId */ },
+    async session({ session, token }) { /* expose to client */ },
+  },
+})
+```
+
+Then in `app/api/auth/[...nextauth]/route.ts`:
+
+```ts
+import { handlers } from "@/lib/auth";
+export const { GET, POST } = handlers;
+```
+
+### Server-side session check
+
+```ts
+import { auth } from "@/lib/auth";
+const session = await auth();
+if (!session) redirect("/api/auth/signin");
+```
+
+### Slack OAuth requires HTTPS for the callback URL
+
+Even in local development. Operator must use ngrok or similar to test admin sign-in locally; otherwise rely on Vercel preview deploys.
+
 ## Confirmed: plan's Task 12 receiver shape is correct
 
 The receiver code in the plan (with `init`, `start`, `stop`, `handle`,
