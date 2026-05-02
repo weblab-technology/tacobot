@@ -1,3 +1,30 @@
 node_modules/
+.pnpm-store/
+
+# Next.js
+.next/
+out/
+next-env.d.ts
+
+# Environment
+.env
+.env.local
+.env*.local
+
+# Drizzle
+drizzle/meta/_journal.json
+
+# Vercel
+.vercel/
+
+# Testing
+coverage/
+
+# Editors
+.idea/
+.vscode/
+.DS_Store
+
+# Legacy (no longer applicable but historically present)
 config.js
 db.json
