@@ -1,4 +1,4 @@
-import { boltApp } from "./bolt";
+import { getBoltApp } from "./bolt";
 import { config } from "@/lib/config";
 
 let cached: string | undefined = config.slack.botUserId;
@@ -8,7 +8,7 @@ export async function getBotUserId(): Promise<string> {
   if (cached) return cached;
   if (inflight) return inflight;
   inflight = (async () => {
-    const res = await boltApp.client.auth.test({ token: config.slack.botToken });
+    const res = await getBoltApp().client.auth.test({ token: config.slack.botToken });
     if (!res.user_id) throw new Error("auth.test returned no user_id");
     cached = res.user_id;
     return cached;
