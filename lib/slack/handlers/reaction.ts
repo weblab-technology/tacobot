@@ -20,6 +20,7 @@ export type ReactionInput = {
   author: string;
   channelId: string;
   messageTs: string;
+  messageText?: string;
 };
 
 export type ReactionOutcome =
@@ -82,7 +83,7 @@ export async function processReaction(database: DbLike, input: ReactionInput): P
     channelId: input.channelId,
     channelTs: input.messageTs,
     envelopeEventId: `react-${input.channelId}-${input.messageTs}-${input.reactor}`,
-    reason: "reaction",
+    reason: input.messageText?.trim() ? input.messageText : "reaction",
   });
 
   const result = await executeGive(database, plan);
@@ -101,8 +102,11 @@ export function registerReactionHandler(app: App) {
     if (event.item.type !== "message") return;
     if (!config.taco.channels.includes(event.item.channel)) return;
 
-    // Resolve author via conversations.history.
+    // Resolve author and message text via conversations.history. Text is
+    // captured here (not just the author) so the activity feed can show what
+    // the reactor was responding to.
     let author: string | undefined;
+    let messageText: string | undefined;
     try {
       const res = await client.conversations.history({
         channel: event.item.channel,
@@ -112,6 +116,7 @@ export function registerReactionHandler(app: App) {
         limit: 1,
       });
       author = res.messages?.[0]?.user;
+      messageText = res.messages?.[0]?.text;
     } catch (err) {
       console.warn("[conversations.history] failed", err);
       return;
@@ -123,6 +128,7 @@ export function registerReactionHandler(app: App) {
       author,
       channelId: event.item.channel,
       messageTs: event.item.ts,
+      messageText,
     });
 
     if (outcome.kind === "over_allowance") {

@@ -65,6 +65,45 @@ test("self-reaction is ignored", async () => {
   });
 });
 
+test("reaction stores the reacted-to message text in transactions.reason", async () => {
+  await withCleanDb(async (db) => {
+    await upsertUser(db, { id: "U_R", name: "R", dailyAllowance: 5 });
+    await upsertUser(db, { id: "U_A", name: "A", dailyAllowance: 5 });
+
+    const out = await processReaction(db, {
+      reactor: "U_R",
+      author: "U_A",
+      channelId: "C_TAQ",
+      messageTs: "1700.0",
+      messageText: "ship it 🚀",
+    });
+
+    expect(out.kind).toBe("ok");
+    const txns = await db.select().from(transactions);
+    expect(txns).toHaveLength(1);
+    expect(txns[0].reason).toBe("ship it 🚀");
+  });
+});
+
+test("reaction with empty message text falls back to literal 'reaction'", async () => {
+  await withCleanDb(async (db) => {
+    await upsertUser(db, { id: "U_R", name: "R", dailyAllowance: 5 });
+    await upsertUser(db, { id: "U_A", name: "A", dailyAllowance: 5 });
+
+    const out = await processReaction(db, {
+      reactor: "U_R",
+      author: "U_A",
+      channelId: "C_TAQ",
+      messageTs: "1700.0",
+      messageText: "   ",
+    });
+
+    expect(out.kind).toBe("ok");
+    const [t] = await db.select().from(transactions);
+    expect(t.reason).toBe("reaction");
+  });
+});
+
 test("reaction outside allowlisted channel is ignored", async () => {
   await withCleanDb(async (db) => {
     await upsertUser(db, { id: "U_R", name: "R", dailyAllowance: 5 });
