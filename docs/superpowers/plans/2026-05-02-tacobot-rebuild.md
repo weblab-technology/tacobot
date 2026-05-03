@@ -1,5 +1,7 @@
 # Tacobot Rebuild Implementation Plan
 
+> **EXECUTION STATUS (2026-05-02):** Tasks 1–39 shipped on `feat/tacobot-rebuild`. Tasks 40–46 (Vercel deploy + Slack production wiring + smoke test + HeyTaco cutover) are operator-side and remain. **See [`2026-05-02-tacobot-rebuild-execution.md`](2026-05-02-tacobot-rebuild-execution.md)** for the per-phase execution report, the seven plan deviations that were caught during execution, and the operator handoff checklist for the remaining tasks.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Rebuild a 7-year-old Botkit/RTM Slack-bot fork as a Next.js 15 + Bolt + Postgres app on Vercel Pro, including a HeyTaco-style shop catalog and an HR-mediated redemption admin UI for the `wlt-and-shaman` Slack workspace.
@@ -4424,6 +4426,25 @@ These steps are operational, not code; the engineer follows them after the prior
 - [ ] **Step 2:** Update `TACO_CHANNELS` in Vercel env to the production `#taqueria` channel ID. Redeploy.
 - [ ] **Step 3:** Invite the bot to `#taqueria`.
 - [ ] **Step 4:** Announce to the team in `#general`.
+
+---
+
+# Plan Deviations (annotated post-execution)
+
+The plan was written from spec, before any code was run. Seven places needed deviations during execution. The full per-deviation rationale lives in [`2026-05-02-tacobot-rebuild-execution.md`](2026-05-02-tacobot-rebuild-execution.md); this section is a quick map from task to fix.
+
+| Plan task | What the plan said | What was actually shipped | Commit |
+|---|---|---|---|
+| Task 1 step 5 | `git add -A` then commit | Explicit `git add <path1> <path2> …` to avoid sweeping in untracked env files | `8308592` |
+| Task 2 | No `.npmrc` step | Added `.npmrc` with `store-dir=/home/node/.pnpm-store` (pnpm copyfile race in dev container otherwise) | `a7bde07` |
+| Task 2 (gitignore) | Original `.gitignore` from Task 1 | Added `tsconfig.tsbuildinfo` to ignore list | `bd14ed7` |
+| Task 3 (eslint config) | `import nextPlugin from "eslint-config-next"; export default [...nextPlugin, …]` + `lint: next lint` | `FlatCompat` from `@eslint/eslintrc` to bridge legacy config; `lint` script switched to `eslint .` (Next 15 deprecates `next lint`) | `37724f9` |
+| Task 8 | Docker `postgres:16` container + `pg` driver for tests | `@electric-sql/pglite` (in-process WASM Postgres) — dev container has no Docker | `f17db8f` |
+| Task 12 | `new App({ token, receiver })` | Added `processBeforeResponse: true` (FaaS-correct on Vercel — verified via context7 in Task 11) | `f6a33a5` |
+| Task 33 (Auth.js) | `signIn({ profile })` reads `profile["https://slack.com/user_id"] ?? profile.sub` inline | Extracted to a `pickSlackUserId(profile)` helper, used in both `signIn` and `jwt` callbacks | `8630b49` |
+| Task 38 (CI) | Postgres service container + `pnpm db:migrate` + `pnpm build` | No service container (pglite is in-process); skip `pnpm build` (`next build` needs real Slack creds + DB which CI doesn't have); rely on `pnpm typecheck` for compile validation. Vercel runs the real build at deploy time | `7465e94` |
+
+The pure-logic tasks (parser, give-validate, give-decide, executeGive, redeem, all integration tests) shipped exactly as specified. The deviations all clustered around (a) the dev environment's quirks and (b) version drift in `eslint-config-next` / `next lint` between the plan's assumptions and what's actually current.
 
 ---
 
