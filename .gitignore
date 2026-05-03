@@ -9,11 +9,10 @@ tsconfig.tsbuildinfo
 
 # Environment
 .env
-.env.local
+.env.*
 .env*.local
+.env_*
 
-# Drizzle
-drizzle/meta/_journal.json
 
 # Vercel
 .vercel/
