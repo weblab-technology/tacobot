@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Fragment } from "react";
 import { and, desc, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { transactions, users } from "@/lib/db/schema";
 import { resolveChannelName } from "@/lib/slack/channelInfo";
+import { resolveUserName } from "@/lib/slack/userInfo";
 import { formatDayHeading, formatTimeOfDay, localDayKey } from "@/lib/date";
 
 export const runtime = "nodejs";
@@ -14,6 +16,8 @@ export const metadata: Metadata = {
 };
 
 const PAGE_SIZE = 50;
+const MENTION_RE = /<@([UW][A-Z0-9]+)(?:\|[^>]+)?>/g;
+const SLACK_LINK = (id: string) => `https://slack.com/app_redirect?channel=${id}`;
 
 type SearchParams = Promise<{
   channel?: string;
@@ -63,16 +67,30 @@ export default async function ActivityPage({ searchParams }: { searchParams: Sea
   const hasMore = giveEvents.length > PAGE_SIZE;
   const visibleEvents = hasMore ? giveEvents.slice(0, PAGE_SIZE) : giveEvents;
 
-  // Batch-resolve display names for every user that shows up on this page.
+  // Collect every user id we'll need a name for: givers, recipients, and any
+  // <@USERID> mention inside a body.
   const userIds = new Set<string>();
   for (const e of visibleEvents) {
     if (e.fromUserId) userIds.add(e.fromUserId);
     for (const rid of e.recipientIds) userIds.add(rid);
+    if (e.reason) for (const m of e.reason.matchAll(MENTION_RE)) userIds.add(m[1]);
   }
   const userRows = userIds.size
     ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, [...userIds]))
     : [];
-  const nameById = new Map(userRows.map((u) => [u.id, u.name]));
+  const nameById = new Map<string, string>(userRows.map((u) => [u.id, u.name]));
+
+  // For ids the local users table doesn't know about (mentioned but never
+  // received a give, or never been resolved yet), ask Slack. Cheap on warm
+  // cache; bounded by ~PAGE_SIZE distinct ids on a cold one.
+  const missingIds = [...userIds].filter((id) => !nameById.has(id) || nameById.get(id) === id);
+  if (missingIds.length) {
+    const resolved = await Promise.all(missingIds.map((id) => resolveUserName(id)));
+    for (let i = 0; i < missingIds.length; i++) {
+      const name = resolved[i];
+      if (name) nameById.set(missingIds[i], name);
+    }
+  }
 
   // Resolve channel names for the filter dropdown plus any channel that shows
   // up in the visible page (typically a small overlap).
@@ -209,13 +227,11 @@ function ActivityRow({
   channelLabelById: Map<string, string | null>;
 }) {
   const ts = new Date(event.createdAt);
-  const giverName = event.fromUserId ? nameById.get(event.fromUserId) ?? event.fromUserId : "(unknown)";
-  const recipientNames = event.recipientIds.map((id) => nameById.get(id) ?? id);
+  const giverName = displayName(event.fromUserId, nameById);
   const isReaction = event.slackEventId.startsWith("react-");
   const perRecipient = event.recipientCount > 0 ? Math.round(event.totalAmount / event.recipientCount) : event.totalAmount;
   const tacoWord = perRecipient === 1 ? "taco" : "tacos";
   const channelName = event.slackChannelId ? channelLabelById.get(event.slackChannelId) : null;
-  const channelLabel = channelName ? `#${channelName}` : event.slackChannelId ?? "(no channel)";
   const showBody = event.reason && event.reason !== "reaction";
 
   return (
@@ -223,19 +239,103 @@ function ActivityRow({
       <Avatar name={giverName} />
       <div className="min-w-0 flex-1">
         <div className="text-sm">
-          <span className="font-medium">{giverName}</span>{" "}
+          <UserMention id={event.fromUserId} nameById={nameById} bold />
           <span className="text-gray-700">
-            gave {perRecipient} {tacoWord}
-            {isReaction ? " reaction" : ""} to {joinNames(recipientNames)} in {channelLabel}
-          </span>{" "}
-          <span className="text-gray-400">{formatTimeOfDay(ts)}</span>
+            {" "}gave {perRecipient} {tacoWord}
+            {isReaction ? " reaction" : ""} to{" "}
+          </span>
+          <RecipientList ids={event.recipientIds} nameById={nameById} />
+          <span className="text-gray-700"> in </span>
+          <ChannelMention id={event.slackChannelId} name={channelName ?? null} />
+          <span className="text-gray-400"> {formatTimeOfDay(ts)}</span>
         </div>
         {showBody ? (
-          <div className="mt-1 whitespace-pre-wrap break-words text-sm text-gray-700">{event.reason}</div>
+          <div className="mt-1 whitespace-pre-wrap break-words text-sm text-gray-700">
+            <BodyText text={event.reason!} nameById={nameById} />
+          </div>
         ) : null}
       </div>
     </div>
   );
+}
+
+function UserMention({
+  id,
+  nameById,
+  bold = false,
+}: {
+  id: string | null;
+  nameById: Map<string, string>;
+  bold?: boolean;
+}) {
+  if (!id) return <span className="text-gray-500">(unknown)</span>;
+  const name = displayName(id, nameById);
+  const cls = `text-amber-700 hover:underline ${bold ? "font-semibold" : ""}`.trim();
+  return (
+    <a href={SLACK_LINK(id)} className={cls} target="_blank" rel="noreferrer">
+      {name}
+    </a>
+  );
+}
+
+function RecipientList({ ids, nameById }: { ids: string[]; nameById: Map<string, string> }) {
+  if (ids.length === 0) return <span className="text-gray-500">(no one)</span>;
+  return (
+    <>
+      {ids.map((id, i) => (
+        <Fragment key={id}>
+          {i > 0 ? <span className="text-gray-700">{i === ids.length - 1 ? " and " : ", "}</span> : null}
+          <UserMention id={id} nameById={nameById} />
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+function ChannelMention({ id, name }: { id: string | null; name: string | null }) {
+  if (!id) return <span className="text-gray-500">(no channel)</span>;
+  return (
+    <a
+      href={SLACK_LINK(id)}
+      className="text-amber-700 hover:underline"
+      target="_blank"
+      rel="noreferrer"
+    >
+      #{name ?? id}
+    </a>
+  );
+}
+
+function BodyText({ text, nameById }: { text: string; nameById: Map<string, string> }) {
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  let key = 0;
+  for (const m of text.matchAll(MENTION_RE)) {
+    const start = m.index ?? 0;
+    if (start > cursor) parts.push(text.slice(cursor, start));
+    const id = m[1];
+    const name = displayName(id, nameById);
+    parts.push(
+      <a
+        key={key++}
+        href={SLACK_LINK(id)}
+        className="font-medium text-amber-700 hover:underline"
+        target="_blank"
+        rel="noreferrer"
+      >
+        @{name}
+      </a>,
+    );
+    cursor = start + m[0].length;
+  }
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return <>{parts}</>;
+}
+
+function displayName(id: string | null, nameById: Map<string, string>): string {
+  if (!id) return "(unknown)";
+  const n = nameById.get(id);
+  return n && n !== id ? n : id;
 }
 
 function Avatar({ name }: { name: string }) {
@@ -250,11 +350,4 @@ function Avatar({ name }: { name: string }) {
       {initials || "?"}
     </div>
   );
-}
-
-function joinNames(names: string[]): string {
-  if (names.length === 0) return "(no one)";
-  if (names.length === 1) return names[0];
-  if (names.length === 2) return `${names[0]} and ${names[1]}`;
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
