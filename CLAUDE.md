@@ -1,50 +1,130 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (and human contributors) working on Tacobot. Keep this file accurate; an outdated CLAUDE.md is worse than none.
 
 ## What this is
 
-Tacobot is a Slack bot (inspired by HeyTaco) that lets users reward each other with `:taco:` reactions. Each user has a daily allowance of 5 tacos to give; counts and balances are persisted in a local JSON file.
+Tacobot is a Slack `:taco:` recognition bot with an admin shop. Users react with 🌮 (or post `<@user> :taco: :taco:`) in allowlisted channels; recipients accumulate a `balance` they spend in `/shop` via HR-mediated redemption. Daily allowance resets at 00:00 UTC.
+
+**Stack:** Next.js 15 (App Router) + TypeScript + Tailwind on Vercel · `@slack/bolt` v4 with a custom App-Router receiver · Vercel Postgres + Drizzle ORM · Auth.js v5 with Slack OIDC for `/admin` · Vitest with `@electric-sql/pglite` for in-process integration tests · Node 20, pnpm 9.
+
+User-facing overview lives in `README.md`. Architectural deep-dive lives in `docs/architecture.md`.
+
+## Repo layout
+
+```
+app/
+  layout.tsx                       Root layout, metadata, favicons
+  page.tsx                         Landing
+  shop/page.tsx                    Public catalog (ISR, revalidate=60); renders HR contact link
+  admin/layout.tsx                 Auth gate: redirects unauthenticated to signin
+  admin/page.tsx                   Admin home
+  admin/users/{page,actions}.tsx   User table + redemption form (deductTacos)
+  admin/items/{page,actions}.tsx   Items CRUD + Vercel Blob upload
+  api/auth/[...nextauth]/route.ts  Auth.js handlers
+  api/slack/events/route.ts        Bolt webhook: getReceiver().handle(req)
+  api/cron/reset-allowance/        Daily reset; verified via Bearer ${CRON_SECRET}
+
+lib/
+  config.ts                        Lazy env-var getters (see Invariants)
+  auth.ts                          NextAuth + Slack OIDC + admin allowlist gate
+  db/
+    client.ts                      Drizzle client over @vercel/postgres
+    schema.ts                      users, items, transactions; CHECK constraints
+    queries.ts                     upsertUser, ensureUserExists, listActiveItems
+    types.ts                       DbLike (Postgres / pglite-compatible)
+  slack/
+    bolt.ts                        Lazy singleton App + Receiver factories
+    receiver.ts                    AppRouterReceiver: HMAC verify, URL handshake
+    handlers.ts                    registerAllHandlers() — wires the four below
+    handlers/message.ts            Channel `:taco:` mention → give
+    handlers/reaction.ts           `reaction_added` (taco emoji) → 1-taco give
+    handlers/commands.ts           App mentions + DMs: score/balance/left/shop/help
+    handlers/userSync.ts           team_join + user_change → upsert/deactivate
+    give.ts                        validate() + decide() — pure domain logic
+    execute.ts                     executeGive() — transactional with idempotency
+    parser.ts                      countTacos, findUserIds
+    format.ts                      Slack message strings
+    userInfo.ts                    resolveUserName with 1h TTL + in-flight dedup
+    botUserId.ts                   getBotUserId() singleton
+  admin/redeem.ts                  redeem() — transactional balance deduction
+
+drizzle/                           Generated migrations (commit them)
+scripts/sync-users.ts              One-shot bootstrap from Slack users.list
+tests/unit/                        Pure-logic tests (parser, format, decide, validate, receiver-verify)
+tests/integration/                 PGlite tests (constraints, execute, redemption, reaction, cron, command-score)
+tests/integration/helpers/db.ts    getDb(), inRollbackTx(), withCleanDb()
+.github/workflows/ci.yml           typecheck + lint + test on push/PR
+vercel.json                        Cron: `0 0 * * *` → /api/cron/reset-allowance
+```
 
 ## Commands
 
-- `yarn install` — install dependencies
-- `yarn start` — runs `index.js` under `nodemon` with `NODE_ENV=development` (the only real way to run the bot)
-- `yarn test-slack` — runs `slack.test.js` (just calls `slack.getAllUsers()` once)
-- `yarn test-taco` — runs `taco.test.js` (just calls `taco.giveTaco("kevin")`)
+```bash
+pnpm install
+pnpm dev                 # Next dev server on :3000
+pnpm build               # runs `db:migrate` then `next build`
+pnpm typecheck           # tsc --noEmit
+pnpm lint                # eslint .
+pnpm test                # vitest run
+pnpm test:watch          # watch mode
+pnpm db:generate         # drizzle-kit generate (after schema edits)
+pnpm db:migrate          # drizzle-kit migrate
+pnpm db:studio           # drizzle-kit studio (web UI)
+pnpm sync-users          # bootstrap users from Slack workspace
+```
 
-There is **no test runner, linter, or CI**. The `*.test.js` files are not real tests — the README explicitly notes "tests are not up to date and are legacy of quick developing". Treat them as throwaway smoke scripts. Engine pin is Node 10.x in `package.json`.
+CI runs `typecheck && lint && test` on every push and PR. Always run those locally before claiming done.
 
-## Required local setup before running
+## Critical invariants
 
-Two files are gitignored and must exist locally for the bot to start:
+These are load-bearing. Don't paper over them — fix the underlying issue.
 
-- `config.js` — exports `{ controller, token }` with Slack app credentials. The shape is documented in `README.md` (clientId, clientSecret, scopes, clientSigningSecret, clientVerificationToken, plus the bot OAuth `token`). `index.js` and `slack.js` both `require("./config.js")` at load time, so missing config is a hard crash.
-- `db.json` — auto-generated on first successful RTM connect via `taco.init()` → `slack.getAllUsers()`.
+- **Lazy env validation** (`lib/config.ts`). Properties are getters; reading them throws if the env var is missing. This lets `next build` import route modules without secrets. Never access env at module-top scope; always go through `config.*`.
+- **Lazy Bolt singletons** (`lib/slack/bolt.ts`). `getReceiver()` and `getBoltApp()` memoize. `next build` must not require Slack secrets.
+- **`processBeforeResponse: true`** is set on the Bolt App (FaaS-correct on Vercel — the function stays alive until handlers finish). Slack's 3-second ack still applies to total handler runtime; budget <500ms per event.
+- **URL-verification short-circuits** before Bolt dispatch in `lib/slack/receiver.ts`. Don't move signature-verify around it.
+- **HMAC-SHA256 signature verify** with a 5-minute replay window and `crypto.timingSafeEqual` (`lib/slack/receiver.ts:84`). The receiver reads the raw body via `req.text()` — never `req.json()` first, or the signature won't match.
+- **Atomic give** (`lib/slack/execute.ts:20`): `UPDATE users SET dailyRemaining = dailyRemaining - N WHERE id = … AND dailyRemaining >= N RETURNING id`. If the UPDATE returns 0 rows, the transaction rolls back as `over_allowance`. Never read-then-write.
+- **Atomic redeem** (`lib/admin/redeem.ts:17`): same pattern on `balance`. The DB CHECK (`balance >= 0`) is the second line of defence.
+- **Idempotency**: each individual taco is its own `transactions` row keyed by `slack_event_id` (composite: `${envelopeEventId}-${idx}` for messages, `react-${channel}-${ts}-${reactor}` for reactions). The unique-constraint + `onConflictDoNothing` makes Slack retries safe; if any insert returns 0 rows the whole give rolls back as `duplicate`.
+- **DB CHECK constraints** (`lib/db/schema.ts`): `dailyRemaining/receivedTotal/balance >= 0`, `balance <= receivedTotal`, `priceTacos > 0`, `quantity > 0 OR NULL`, unique `lower(name)` among active items, give-vs-redeem row shape (give has `fromUserId` and no admin/item, redeem has `adminUserId` + `itemId` and no `fromUserId`, no self-gives). Don't bypass with raw SQL.
+- **Auth.js admin gate** (`lib/auth.ts:14`) lives in the `signIn` callback, not a layout redirect. Non-admins never get a session. The admin layout still redirects unauthenticated visitors to `/api/auth/signin?callbackUrl=/admin`.
+- **User-name freshness** (`lib/slack/userInfo.ts`): 1-hour TTL cache + in-flight dedup. Score/leaderboard renders `<@USERID>` mentions so Slack handles current display name + avatar — we never have to re-render the cached name.
 
-## Architecture
+## Conventions
 
-Single-process Node app. Entry point `index.js` wires four pieces together:
+- TypeScript strict, ESM, Next.js App Router. React 19 server components by default; opt into `"use client"` only when you need it.
+- Drizzle queries belong in `lib/db/queries.ts`; don't scatter ORM calls across handlers.
+- Slack handlers belong in `lib/slack/handlers/`. Pure logic (validate, decide, parse, format) belongs in sibling files and stays unit-testable.
+- Tests: unit under `tests/unit/`, integration under `tests/integration/` using PGlite. `inRollbackTx` (per-test SAVEPOINT) is the default; use `withCleanDb` only when a test needs multiple connections.
+- Prettier (`.prettierrc`): `semi: true`, double quotes, trailing-comma `all`, 100 cols, 2-space indent. ESLint flat config in `eslint.config.mjs`.
+- Commit messages match the existing repo style: lower-case `type(scope): summary` (e.g. `feat(items): quantity, redemption instructions, image upload`).
 
-1. **Botkit RTM** (`index.js`) — `Botkit.slackbot(config.controller)` + `bot.startRTM()`. On `rtm_close` it retries indefinitely (60s backoff). On successful connect it calls `taco.init()` (populate DB if missing) then `tacobot.listens(controller)` (register handlers). A `node-schedule` job at 00:00 daily calls `taco.resetLeft()` to refill every user's allowance to 5.
+## Common gotchas
 
-2. **Message handlers** (`bot.js`) — registers four `controller.hears` listeners:
-   - `:taco:` on `ambient` → finds mentioned user via `parser.findID`, counts tacos via `parser.countTacos`, validates sender has enough `left`, then `giveTaco` + `removeLeft` + adds `:taco:` reaction.
-   - `score`/`ranking` on `direct_mention`/`direct_message` → top-5 leaderboard.
-   - `left`/`how many`/`how much`/`combien` on `direct_message` → reports caller's remaining allowance.
-   - `help`/`aide`/`commandes` on direct → help text.
+- Don't add a second daily-allowance source — read `config.taco.dailyAllowance` only.
+- Don't bypass `validate()` → `decide()` → `executeGive()`. The chain encodes channel allowlist, dedup, self-give filter, and atomicity. Same shape for reactions in `lib/slack/handlers/reaction.ts:processReaction`.
+- Don't `req.json()` before HMAC verify — JSON parse can canonicalize whitespace/key order and break the signature.
+- Adding a new env var means three edits: a getter in `lib/config.ts`, a row in `.env.example` (with comment), and a row in the README env table.
+- Adding a DB column means: edit `lib/db/schema.ts`, run `pnpm db:generate`, commit the new file under `drizzle/`. Never edit a migration after merge.
+- The Vercel cron expression in `vercel.json` doesn't interpolate env vars. Timezone changes are file-edit + redeploy.
+- The cron route accepts both POST and GET (Vercel's behaviour varies). Both verify `Authorization: Bearer ${CRON_SECRET}`.
+- The reaction handler resolves the message author via `conversations.history` (the `reaction_added` payload doesn't include it). Failure there silently drops the event.
+- Slack types `event` as a discriminated union — narrow with `if ("user" in event)` / `event.subtype === …` rather than casting.
 
-3. **Domain logic** (`taco.js`) — `init`/`populate` pulls all Slack users via `slack.getAllUsers()`, formats to `{id, name, tacos: 0, left: 5}`, and merges with existing DB rows (preserves counts; updates names). `giveTaco`/`removeLeft`/`resetLeft` are index-based mutations on the user array.
+## Where things live for common tasks
 
-4. **Persistence** (`db.js`) — The "database" is a single `db.json` written via `fs.writeFileSync` on every change. All reads re-read the file. There is no caching, no transactions, and no concurrency control — every handler invocation does a full read-modify-write cycle. Users are addressed by **array index**, not ID, so `DB.getUser(index)` ordering must stay stable; `taco.writeMembers` rewrites the whole array.
+| Task | File(s) |
+| --- | --- |
+| Add a DM/mention command | `lib/slack/handlers/commands.ts` (regex + `dispatch()`) |
+| Change give/over-allowance message wording | `lib/slack/format.ts` |
+| Add a shop-item field | `lib/db/schema.ts` → `pnpm db:generate` → `app/admin/items/{page,actions}.tsx` → `app/shop/page.tsx` |
+| Change daily-reset time | `vercel.json` cron expression |
+| Change give/redeem rules | `lib/slack/give.ts` + `lib/slack/execute.ts` (or `lib/admin/redeem.ts`) |
+| Bootstrap users from Slack | `pnpm sync-users` (`scripts/sync-users.ts`) |
+| Add an admin | env: `ADMIN_SLACK_IDS` (comma-separated Slack IDs) + redeploy |
+| Add the HR contact link to `/shop` | env: `HR_SLACK_ID` + `HR_SLACK_HANDLE` |
+| Channel allowlist | env: `TACO_CHANNELS` |
 
-5. **Slack web API** (`slack.js`) — direct `axios` GET to `https://slack.com/api/users.list` with `Bearer ${config.token}`, capped at `limit: 100` (no pagination). Used only during DB population, separate from Botkit's RTM connection.
-
-6. **Parsing** (`parser.js`) — `findID` matches `<@\S*>` and strips `<@` and `>`. Note this does not handle the `<@USERID|username>` form Slack sometimes emits. `countTacos` matches `:taco:` globally; it will throw on messages without `:taco:` because `match()` returns `null` (the `:taco:` ambient hear filter prevents this in practice).
-
-## Conventions worth keeping in mind
-
-- CommonJS only (`require`/`module.exports`). No TypeScript, no Babel.
-- Two-space indent, double-quoted strings, no semicolon strictness — match existing style.
-- `bot.js` handlers all follow the same shape: read DB, mutate array by index, write DB, reply via `bot.reply`/`bot.api.*`.
-- Daily allowance is hardcoded to 5 in two places: `taco.writeMembers` (initial value) and `taco.resetLeft` (reset value). Keep them in sync.
+For a deeper map (data flow, idempotency, concurrency model), see `docs/architecture.md`. For the operator runbook (deploy, audit queries, smoke tests), see `docs/operations.md`. For local-dev specifics (devcontainer, ngrok, testing patterns), see `docs/development.md`.

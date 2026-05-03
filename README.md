@@ -4,6 +4,26 @@ Internal Slack recognition program for the `wlt-and-shaman` workspace. Inspired 
 
 Give 🌮 reactions to teammates in `#taqueria`. Every employee has a daily allowance (default 5). Tacos accumulate as a `balance` that can be redeemed in the [shop](#) — HR-mediated.
 
+## What it does
+
+- **Give by reaction**: react to a teammate's message with 🌮 → they get 1 taco.
+- **Give by mention**: post `<@teammate> :taco: :taco:` in an allowlisted channel → 2 tacos to that teammate. Multi-recipient gives split the count per recipient.
+- **Daily allowance**: each user gets `TACO_DAILY_ALLOWANCE` tacos to give per day, auto-reset at 00:00 UTC by a Vercel cron.
+- **Two counters per user**: lifetime `received_total` (for the leaderboard) and current `balance` (redeemable).
+- **DM commands**: `score`, `balance`, `left`, `shop`, `help` — English and French aliases.
+- **Public shop**: `/shop` lists active items with prices, descriptions, and a "DM HR" link.
+- **Admin console**: `/admin/items` (catalog CRUD with image upload) and `/admin/users` (redemption form), gated by Sign in with Slack against `ADMIN_SLACK_IDS`.
+- **Append-only audit log**: every give and redemption is a row in `transactions` with the channel, message timestamp, admin, item, and reason.
+- **Slack-retry idempotent**: each individual taco has a unique `slack_event_id`; retries are no-ops, not duplicates.
+- **Concurrent-safe**: gives and redemptions use atomic `UPDATE … WHERE balance/daily_remaining >= N` so concurrent attempts can't overdraw.
+
+## Quick links
+
+- **Employees** ("how do I give and spend tacos?") → [docs/user-guide.md](docs/user-guide.md)
+- **HR / shop admins** ("how do I manage items and process redemptions?") → [docs/hr-guide.md](docs/hr-guide.md)
+- **Engineers** ("how is this built? how do I extend it?") → [CLAUDE.md](CLAUDE.md) and [docs/architecture.md](docs/architecture.md)
+- **Operators** ("how do I deploy, run, monitor?") → continue reading, then [docs/operations.md](docs/operations.md)
+
 ## Stack
 
 Next.js 15 + TypeScript + Tailwind on Vercel Pro · Bolt for JS (Slack Events API) · Vercel Postgres + Drizzle ORM · Auth.js v5 + Slack OIDC for the admin pages · Vitest with [pglite](https://github.com/electric-sql/pglite) for in-process integration tests.
@@ -33,10 +53,13 @@ Copy `.env.example` to `.env.local` (for dev) or set them in Vercel project sett
 | `TACO_CHANNELS` | Comma-separated channel IDs where typed/reaction gives count |
 | `TACO_DAILY_ALLOWANCE` | Defaults to 5 |
 | `ADMIN_SLACK_IDS` | Comma-separated Slack user IDs allowed into `/admin` |
+| `HR_SLACK_ID` | Optional; if set, `/shop` renders a clickable DM link to this Slack user |
+| `HR_SLACK_HANDLE` | Optional; display handle (without `@`) for the `/shop` HR contact |
 | `AUTH_SECRET` | `openssl rand -base64 32` |
 | `AUTH_URL` | Auto-set on Vercel via `VERCEL_URL` |
 | `POSTGRES_URL` | Provided by the Vercel Postgres integration |
 | `NEXT_PUBLIC_SHOP_URL` | Public URL of `/shop` |
+| `NEXT_PUBLIC_COMPANY_NAME` | Appears in the page `<title>`; defaults to "WLT" |
 | `CRON_SECRET` | Auto-injected by Vercel for cron requests |
 
 ### 3. Migrate the database
@@ -75,16 +98,18 @@ pnpm install
 pnpm dev
 ```
 
-The dev server crashes if `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` aren't set (config validation throws at module load). Provide them via `.env.local`.
+The dev server starts fine without secrets, but the moment a route reads `config.slack.botToken` (or any required env var) it throws. Provide the values via `.env.local` before exercising the Slack webhook or admin pages.
 
 ### Tests
 
-Integration tests run against an in-process pglite (PGlite) — no Docker, no real Postgres needed locally:
+Integration tests run against an in-process PGlite — no Docker, no real Postgres needed locally:
 
 ```bash
 pnpm test
 pnpm test:watch     # watch mode
 ```
+
+For the full development workflow (devcontainer, debugging, testing patterns, migration workflow, CI), see [docs/development.md](docs/development.md).
 
 ### Slack event delivery during dev
 
@@ -92,7 +117,7 @@ Slack must reach a public URL to deliver events. For local dev:
 
 1. `ngrok http 3000` (or `cloudflared tunnel`).
 2. Update the Slack app's Event Subscriptions URL to the ngrok URL with path `/api/slack/events`.
-3. Don't forget to set Slack app's OAuth redirect URL to the ngrok URL too if testing admin sign-in locally.
+3. Don't forget to set the Slack app's OAuth redirect URL too if testing admin sign-in locally.
 
 For most development, deploying to a Vercel preview branch is simpler than running locally — Vercel preview deploys are free and reachable from Slack.
 
@@ -105,90 +130,24 @@ For most development, deploying to a Vercel preview branch is simpler than runni
 5. Push to the deploy branch; Vercel runs `pnpm build` (which includes `pnpm db:migrate`) and `next build`.
 6. After the first deploy, run `pnpm sync-users` once locally with the production `POSTGRES_URL` set in `.env.local`, to bulk-import existing workspace members.
 
-## Operations
+## Operations (quick reference)
 
-### Add an admin
+| Action | How |
+|---|---|
+| Add or remove an admin | Update `ADMIN_SLACK_IDS` in Vercel env, redeploy |
+| Change the channel allowlist | Update `TACO_CHANNELS`, redeploy, `/invite @tacobot` in any new channel |
+| Change the daily allowance | Update `TACO_DAILY_ALLOWANCE`; the next 00:00 UTC reset refills everyone to the new value |
+| Change the daily-reset timezone | Edit the cron expression in `vercel.json` (UTC; env-vars don't interpolate). Default `0 0 * * *` is UTC midnight; e.g. `0 8 * * *` = 08:00 UTC |
+| Rotate Slack signing secret | Regenerate in Slack dashboard → update `SLACK_SIGNING_SECRET` in Vercel → redeploy |
+| Inspect data | `pnpm db:studio` opens Drizzle Studio against the configured database |
 
-Update `ADMIN_SLACK_IDS` in Vercel env vars (comma-separated). Redeploy.
+For runbook-level detail (smoke checklist, audit-query cookbook, monitoring, failure-mode cheatsheet, manual balance correction policy), see [docs/operations.md](docs/operations.md).
 
-### Change channel allowlist
+## Architecture
 
-Update `TACO_CHANNELS`. Redeploy. (No data migration needed — past transactions reference the channel they were sent in.)
+End-to-end: Slack POSTs to `/api/slack/events` → custom `AppRouterReceiver` verifies the HMAC and short-circuits URL-verification handshakes → Bolt App dispatches to the message / reaction / command / user-sync handlers in `lib/slack/handlers/` → pure validate/decide logic in `lib/slack/give.ts` → atomic transactional execute in `lib/slack/execute.ts` → Drizzle → Postgres. Auth.js v5 with the Slack OIDC provider gates `/admin/*` (the allowlist check is in the `signIn` callback, so non-admins never get a session). A daily Vercel cron resets the allowance.
 
-### Change daily allowance
-
-Update `TACO_DAILY_ALLOWANCE`. The next daily reset (00:00 UTC) refills everyone to the new value.
-
-### Change the daily-reset timezone
-
-Edit the cron expression in `vercel.json`. Vercel Cron schedules don't interpolate env vars, so the timezone is fixed in the file. Default `0 0 * * *` is UTC midnight; e.g. `0 8 * * *` would be 08:00 UTC (10:00 in Western Europe).
-
-### Rotate Slack signing secret
-
-Regenerate in Slack app dashboard → update Vercel env → redeploy. No DB changes.
-
-### Inspect data
-
-`pnpm db:studio` opens Drizzle Studio against the configured database.
-
-## Audit queries
-
-The `transactions` table is the audit log. Sample queries:
-
-```sql
--- All redemptions in a quarter
-SELECT u.name AS employee, i.name AS item, t.amount, t.reason, t.created_at,
-       a.name AS admin
-FROM transactions t
-JOIN users u ON u.id = t.to_user_id
-JOIN items i ON i.id = t.item_id
-LEFT JOIN users a ON a.id = t.admin_user_id
-WHERE t.type = 'redeem'
-  AND t.created_at >= '2026-04-01' AND t.created_at < '2026-07-01'
-ORDER BY t.created_at DESC;
-
--- Top givers this month
-SELECT u.name, SUM(t.amount) AS given
-FROM transactions t
-JOIN users u ON u.id = t.from_user_id
-WHERE t.type = 'give' AND t.created_at >= date_trunc('month', now())
-GROUP BY u.name ORDER BY given DESC LIMIT 10;
-
--- Top receivers this month
-SELECT u.name, SUM(t.amount) AS received
-FROM transactions t
-JOIN users u ON u.id = t.to_user_id
-WHERE t.type = 'give' AND t.created_at >= date_trunc('month', now())
-GROUP BY u.name ORDER BY received DESC LIMIT 10;
-
--- Permalink for a give
-SELECT 'https://wlt-and-shaman.slack.com/archives/' || slack_channel_id ||
-       '/p' || replace(slack_message_ts, '.', '')
-FROM transactions WHERE id = '<txn-id>';
-```
-
-## Smoke-test checklist
-
-Run after every deploy in `#taqueria-beta`:
-
-- [ ] Bot is online and a member of the channel.
-- [ ] Type `<@teammate> :taco:`. Recipient's `received_total` and `balance` increment, your `daily_remaining` decrements, your message gets a 🌮 reaction.
-- [ ] React to a teammate's message with 🌮. Their balance increments.
-- [ ] DM `@tacobot score` — replies with top 5 by lifetime received.
-- [ ] DM `@tacobot balance` — replies with your current balance + shop URL.
-- [ ] DM `@tacobot left` — replies with your remaining daily allowance.
-- [ ] DM `@tacobot help` — replies with command list.
-- [ ] Try giving yourself a taco — silently no-ops.
-- [ ] Try giving more tacos than you have — gets an ephemeral rejection.
-- [ ] `/shop` loads and shows current items.
-- [ ] Sign in to `/admin/items` (with an admin Slack ID) — add an item, confirm it appears on `/shop`.
-- [ ] Sign in to `/admin/users` — deduct tacos from a test user — balance drops, transaction recorded.
-- [ ] Sign-in attempt as a non-admin — rejected.
-- [ ] Next morning: confirm `daily_remaining` reset to the configured allowance.
-
-## Architecture notes
-
-See [docs/superpowers/specs/2026-05-02-tacobot-rebuild-design.md](docs/superpowers/specs/2026-05-02-tacobot-rebuild-design.md) for the design spec, and [docs/bolt-app-router-notes.md](docs/bolt-app-router-notes.md) for verified patterns on Bolt + Auth.js with Next.js App Router.
+For the full system diagram, data-model rationale, give/redeem flow traces, idempotency and concurrency model, see [docs/architecture.md](docs/architecture.md).
 
 ## License
 
