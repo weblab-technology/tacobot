@@ -1,5 +1,6 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import { transactions, users } from "@/lib/db/schema";
+import type { DbLike } from "@/lib/db/types";
 
 export type RedeemInput = {
   employeeId: string;
@@ -11,11 +12,8 @@ export type RedeemInput = {
 
 export type RedeemResult = { kind: "ok" } | { kind: "insufficient" };
 
-// Permissive db param for cross-driver use (production + pglite tests).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function redeem(db: any, input: RedeemInput): Promise<RedeemResult> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return db.transaction(async (tx: any) => {
+export async function redeem(db: DbLike, input: RedeemInput): Promise<RedeemResult> {
+  return db.transaction(async (tx) => {
     const updated = await tx
       .update(users)
       .set({ balance: sql`${users.balance} - ${input.amount}`, updatedAt: sql`now()` })

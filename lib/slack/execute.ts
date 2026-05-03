@@ -1,5 +1,6 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import { transactions, users } from "@/lib/db/schema";
+import type { DbLike } from "@/lib/db/types";
 import type { GivePlan } from "./give";
 
 export type ExecuteResult =
@@ -13,13 +14,9 @@ class DuplicateGiveError extends Error {
   }
 }
 
-// Permissive db param so this works with both production Vercel Postgres
-// and pglite-backed test instances (per Task 18's typing decision).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function executeGive(db: any, plan: GivePlan): Promise<ExecuteResult> {
+export async function executeGive(db: DbLike, plan: GivePlan): Promise<ExecuteResult> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (await db.transaction(async (tx: any) => {
+    return (await db.transaction(async (tx) => {
       const decremented = await tx
         .update(users)
         .set({

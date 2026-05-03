@@ -1,16 +1,13 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { items, users } from "./schema";
+import type { DbLike } from "./types";
 
 /**
  * Insert or update a user. On conflict, updates the name and updatedAt timestamp
  * while preserving all counters (receivedTotal, balance, dailyRemaining).
- *
- * Works with both production Vercel Postgres and test pglite database instances.
- * Using `any` for the db parameter to accommodate both driver-specific Drizzle types.
  */
 export async function upsertUser(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db: any,
+  db: DbLike,
   input: { id: string; name: string; dailyAllowance: number },
 ) {
   await db
@@ -30,15 +27,11 @@ export async function upsertUser(
 }
 
 /**
- * List all active shop items, ordered by price (ascending) then name (ascending).
- * Returns only the fields needed for display.
- *
- * Works with both production Vercel Postgres and test pglite database instances.
- * Using `any` for the db parameter to accommodate both driver-specific Drizzle types.
+ * List active shop items, cheapest first then alphabetical. Returns only the
+ * fields needed for display on `/shop`.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function listActiveItems(database: any) {
-  return database
+export async function listActiveItems(db: DbLike) {
+  return db
     .select({
       id: items.id,
       name: items.name,

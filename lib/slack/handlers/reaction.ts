@@ -1,6 +1,7 @@
 import type { App } from "@slack/bolt";
 import { db } from "@/lib/db/client";
 import { upsertUser } from "@/lib/db/queries";
+import type { DbLike } from "@/lib/db/types";
 import { config } from "@/lib/config";
 import { decide, validate, type GiverState } from "../give";
 import { executeGive } from "../execute";
@@ -21,10 +22,7 @@ export type ReactionOutcome =
   | { kind: "ignore"; reason: string }
   | { kind: "over_allowance"; demand: number; remaining: number };
 
-// Permissive db param so this works with both production Vercel Postgres
-// and pglite-backed test instances.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function processReaction(database: any, input: ReactionInput): Promise<ReactionOutcome> {
+export async function processReaction(database: DbLike, input: ReactionInput): Promise<ReactionOutcome> {
   if (!config.taco.channels.includes(input.channelId)) {
     return { kind: "ignore", reason: "channel_not_allowlisted" };
   }
