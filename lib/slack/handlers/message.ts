@@ -1,12 +1,17 @@
 import type { App } from "@slack/bolt";
 import { db } from "@/lib/db/client";
-import { upsertUser } from "@/lib/db/queries";
+import { ensureUserExists, upsertUser } from "@/lib/db/queries";
 import { config } from "@/lib/config";
 import { decide, validate, type GiverState } from "../give";
 import { executeGive } from "../execute";
 import { countTacos, findUserIds } from "../parser";
 import { getBotUserId } from "../botUserId";
-import { overAllowanceMessage } from "../format";
+import { resolveUserName } from "../userInfo";
+import {
+  giveSuccessGiverMessage,
+  giveSuccessRecipientMessage,
+  overAllowanceMessage,
+} from "../format";
 import { eq } from "drizzle-orm";
 import { users } from "@/lib/db/schema";
 
@@ -35,10 +40,19 @@ export function registerMessageHandler(app: App) {
     const recipientIds = findUserIds(text).filter((u) => u !== botId);
     if (recipientIds.length === 0) return;
 
-    // Lazy-upsert giver and recipients.
-    await upsertUser(db, { id: giverId, name: giverId, dailyAllowance: config.taco.dailyAllowance });
-    for (const r of recipientIds) {
-      await upsertUser(db, { id: r, name: r, dailyAllowance: config.taco.dailyAllowance });
+    // Lazy-ensure rows exist for giver and recipients (placeholder name=id),
+    // then refresh names from Slack when available so we never overwrite a
+    // good display name with the raw user ID.
+    const allIds = [giverId, ...recipientIds];
+    for (const id of allIds) {
+      await ensureUserExists(db, { id, dailyAllowance: config.taco.dailyAllowance });
+    }
+    const resolvedNames = await Promise.all(allIds.map((id) => resolveUserName(id)));
+    for (let i = 0; i < allIds.length; i++) {
+      const name = resolvedNames[i];
+      if (name) {
+        await upsertUser(db, { id: allIds[i], name, dailyAllowance: config.taco.dailyAllowance });
+      }
     }
 
     const [giverRow] = await db.select().from(users).where(eq(users.id, giverId));
@@ -103,6 +117,28 @@ export function registerMessageHandler(app: App) {
         });
       } catch (err) {
         console.warn("[reactions.add] failed", err);
+      }
+
+      const remainingAfter = giver.dailyRemaining - plan.giverDecrement;
+
+      try {
+        await client.chat.postMessage({
+          channel: giverId,
+          text: giveSuccessGiverMessage(plan, remainingAfter),
+        });
+      } catch (err) {
+        console.warn("[chat.postMessage giver] failed", err);
+      }
+
+      for (const t of plan.transactions) {
+        try {
+          await client.chat.postMessage({
+            channel: t.toUserId,
+            text: giveSuccessRecipientMessage(giverId, t.amount, channelId),
+          });
+        } catch (err) {
+          console.warn("[chat.postMessage recipient] failed", err);
+        }
       }
     }
   });

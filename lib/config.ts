@@ -90,8 +90,19 @@ export const config = {
       return csv("ADMIN_SLACK_IDS");
     },
   },
+  hr: {
+    get slackId(): string | undefined {
+      return optional("HR_SLACK_ID");
+    },
+    get slackHandle(): string | undefined {
+      return optional("HR_SLACK_HANDLE");
+    },
+  },
   get shopUrl(): string {
     return optional("NEXT_PUBLIC_SHOP_URL") ?? "/shop";
+  },
+  get companyName(): string {
+    return optional("NEXT_PUBLIC_COMPANY_NAME") ?? "WLT";
   },
   get cronSecret(): string | undefined {
     return optional("CRON_SECRET");

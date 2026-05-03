@@ -4,16 +4,10 @@ import { db } from "@/lib/db/client";
 import { upsertUser } from "@/lib/db/queries";
 import { users } from "@/lib/db/schema";
 import { config } from "@/lib/config";
+import { pickName } from "@/lib/slack/userInfo";
 
-function pickName(u: {
-  profile?: { display_name?: string; real_name?: string };
-  name?: string;
-}): string {
-  const dn = u.profile?.display_name?.trim();
-  if (dn) return dn;
-  const rn = u.profile?.real_name?.trim();
-  if (rn) return rn;
-  return u.name ?? "unknown";
+function nameOrFallback(u: Parameters<typeof pickName>[0]): string {
+  return pickName(u) ?? "unknown";
 }
 
 export function registerUserSyncHandlers(app: App) {
@@ -22,7 +16,7 @@ export function registerUserSyncHandlers(app: App) {
     if (!u || u.is_bot || u.deleted) return;
     await upsertUser(db, {
       id: u.id,
-      name: pickName(u),
+      name: nameOrFallback(u),
       dailyAllowance: config.taco.dailyAllowance,
     });
   });
@@ -38,7 +32,7 @@ export function registerUserSyncHandlers(app: App) {
     }
     await upsertUser(db, {
       id: u.id,
-      name: pickName(u),
+      name: nameOrFallback(u),
       dailyAllowance: config.taco.dailyAllowance,
     });
   });

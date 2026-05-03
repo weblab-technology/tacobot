@@ -1,8 +1,12 @@
 import "./globals.css";
 import type { Metadata } from "next";
+import { config } from "@/lib/config";
 
 export const metadata: Metadata = {
-  title: "Tacobot",
+  title: {
+    default: `Tacobot - ${config.companyName}`,
+    template: `%s · Tacobot - ${config.companyName}`,
+  },
   description: "Internal recognition program for wlt-and-shaman",
   icons: {
     icon: [

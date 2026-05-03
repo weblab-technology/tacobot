@@ -19,6 +19,11 @@ vi.mock("@/lib/slack/botUserId", () => ({
   getBotUserId: async () => "U_BOT",
 }));
 
+vi.mock("@/lib/slack/userInfo", () => ({
+  resolveUserName: async () => null,
+  pickName: () => null,
+}));
+
 beforeEach(() => vi.clearAllMocks());
 
 test("reaction give credits the message author", async () => {
@@ -31,6 +36,16 @@ test("reaction give credits the message author", async () => {
     });
 
     expect(out.kind).toBe("ok");
+    if (out.kind === "ok") {
+      expect(out.remainingAfter).toBe(4);
+      expect(out.plan.giverDecrement).toBe(1);
+      expect(out.plan.transactions).toHaveLength(1);
+      expect(out.plan.transactions[0]).toMatchObject({
+        toUserId: "U_A",
+        fromUserId: "U_R",
+        amount: 1,
+      });
+    }
     const [a] = await db.select().from(users).where(eq(users.id, "U_A"));
     expect(a.balance).toBe(1);
 

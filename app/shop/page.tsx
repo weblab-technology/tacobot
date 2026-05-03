@@ -1,8 +1,13 @@
+import type { Metadata } from "next";
 import { db } from "@/lib/db/client";
 import { listActiveItems } from "@/lib/db/queries";
 
 export const runtime = "nodejs";
 export const revalidate = 60;
+
+export const metadata: Metadata = {
+  title: "Shop",
+};
 
 export default async function ShopPage() {
   const items = await listActiveItems(db);

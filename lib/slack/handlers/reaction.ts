@@ -1,12 +1,17 @@
 import type { App } from "@slack/bolt";
 import { db } from "@/lib/db/client";
-import { upsertUser } from "@/lib/db/queries";
+import { ensureUserExists, upsertUser } from "@/lib/db/queries";
 import type { DbLike } from "@/lib/db/types";
 import { config } from "@/lib/config";
-import { decide, validate, type GiverState } from "../give";
+import { decide, validate, type GiverState, type GivePlan } from "../give";
 import { executeGive } from "../execute";
 import { getBotUserId } from "../botUserId";
-import { overAllowanceMessage } from "../format";
+import { resolveUserName } from "../userInfo";
+import {
+  giveSuccessGiverMessage,
+  giveSuccessRecipientMessage,
+  overAllowanceMessage,
+} from "../format";
 import { eq } from "drizzle-orm";
 import { users } from "@/lib/db/schema";
 
@@ -18,7 +23,7 @@ export type ReactionInput = {
 };
 
 export type ReactionOutcome =
-  | { kind: "ok" }
+  | { kind: "ok"; plan: GivePlan; remainingAfter: number }
   | { kind: "ignore"; reason: string }
   | { kind: "over_allowance"; demand: number; remaining: number };
 
@@ -31,8 +36,18 @@ export async function processReaction(database: DbLike, input: ReactionInput): P
     return { kind: "ignore", reason: "self_or_bot" };
   }
 
-  await upsertUser(database, { id: input.reactor, name: input.reactor, dailyAllowance: config.taco.dailyAllowance });
-  await upsertUser(database, { id: input.author, name: input.author, dailyAllowance: config.taco.dailyAllowance });
+  await ensureUserExists(database, { id: input.reactor, dailyAllowance: config.taco.dailyAllowance });
+  await ensureUserExists(database, { id: input.author, dailyAllowance: config.taco.dailyAllowance });
+  const [reactorName, authorName] = await Promise.all([
+    resolveUserName(input.reactor),
+    resolveUserName(input.author),
+  ]);
+  if (reactorName) {
+    await upsertUser(database, { id: input.reactor, name: reactorName, dailyAllowance: config.taco.dailyAllowance });
+  }
+  if (authorName) {
+    await upsertUser(database, { id: input.author, name: authorName, dailyAllowance: config.taco.dailyAllowance });
+  }
 
   const [reactorRow] = await database.select().from(users).where(eq(users.id, input.reactor));
   if (!reactorRow.isActive) return { kind: "ignore", reason: "reactor_inactive" };
@@ -74,7 +89,10 @@ export async function processReaction(database: DbLike, input: ReactionInput): P
   if (result.kind === "over_allowance") {
     return { kind: "over_allowance", demand: plan.giverDecrement, remaining: giver.dailyRemaining };
   }
-  return { kind: "ok" };
+  if (result.kind === "duplicate") {
+    return { kind: "ignore", reason: "duplicate" };
+  }
+  return { kind: "ok", plan, remainingAfter: giver.dailyRemaining - plan.giverDecrement };
 }
 
 export function registerReactionHandler(app: App) {
@@ -113,6 +131,29 @@ export function registerReactionHandler(app: App) {
         user: event.user,
         text: overAllowanceMessage(outcome.demand, outcome.remaining),
       });
+      return;
+    }
+
+    if (outcome.kind !== "ok") return;
+
+    try {
+      await client.chat.postMessage({
+        channel: event.user,
+        text: giveSuccessGiverMessage(outcome.plan, outcome.remainingAfter),
+      });
+    } catch (err) {
+      console.warn("[chat.postMessage giver] failed", err);
+    }
+
+    for (const t of outcome.plan.transactions) {
+      try {
+        await client.chat.postMessage({
+          channel: t.toUserId,
+          text: giveSuccessRecipientMessage(event.user, t.amount, event.item.channel),
+        });
+      } catch (err) {
+        console.warn("[chat.postMessage recipient] failed", err);
+      }
     }
   });
 }

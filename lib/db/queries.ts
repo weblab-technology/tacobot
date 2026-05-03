@@ -27,6 +27,26 @@ export async function upsertUser(
 }
 
 /**
+ * Ensure a user row exists for `id`. On insert, name defaults to the id as a
+ * placeholder; on conflict, leaves name and counters untouched. Use this from
+ * lazy paths (message/reaction handlers) that only have a Slack ID, so a real
+ * name resolved later is never clobbered.
+ */
+export async function ensureUserExists(
+  db: DbLike,
+  input: { id: string; dailyAllowance: number },
+) {
+  await db
+    .insert(users)
+    .values({
+      id: input.id,
+      name: input.id,
+      dailyRemaining: input.dailyAllowance,
+    })
+    .onConflictDoNothing({ target: users.id });
+}
+
+/**
  * List active shop items, cheapest first then alphabetical. Returns only the
  * fields needed for display on `/shop`.
  */

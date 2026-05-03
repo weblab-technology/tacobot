@@ -2,11 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/lib/auth";
+import { config } from "@/lib/config";
 
 export const metadata: Metadata = {
   title: {
-    default: "Admin · Tacobot",
-    template: "%s · Tacobot Admin",
+    default: `Admin · Tacobot - ${config.companyName}`,
+    template: `%s · Tacobot Admin - ${config.companyName}`,
   },
 };
 
