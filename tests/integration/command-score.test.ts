@@ -41,9 +41,10 @@ test("score returns top 5 by received_total, descending", async () => {
 
     const reply = await __test.dispatch("score", "U_X");
     expect(reply).not.toBeNull();
-    expect(reply).toContain("Bob — 10");
-    expect(reply!.indexOf("Bob")).toBeLessThan(reply!.indexOf("Alice"));
-    expect(reply!.indexOf("Alice")).toBeLessThan(reply!.indexOf("Carol"));
+    // Output uses <@USERID> mentions so Slack renders current display names.
+    expect(reply).toContain("<@U_B> — 10");
+    expect(reply!.indexOf("<@U_B>")).toBeLessThan(reply!.indexOf("<@U_A>"));
+    expect(reply!.indexOf("<@U_A>")).toBeLessThan(reply!.indexOf("<@U_C>"));
   });
 });
 

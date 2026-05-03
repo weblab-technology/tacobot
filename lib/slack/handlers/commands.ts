@@ -14,16 +14,19 @@ const COMMAND_RE = {
 
 async function topReceivers(limit = 5) {
   return db
-    .select({ name: users.name, received: users.receivedTotal })
+    .select({ id: users.id, received: users.receivedTotal })
     .from(users)
     .where(eq(users.isActive, true))
     .orderBy(desc(users.receivedTotal))
     .limit(limit);
 }
 
-function formatScore(rows: { name: string; received: number }[]): string {
+function formatScore(rows: { id: string; received: number }[]): string {
   if (rows.length === 0) return "🌮 No tacos given yet — be the first!";
-  const lines = rows.map((r, i) => `${i + 1}. ${r.name} — ${r.received} 🌮`);
+  // Use <@USERID> mentions; Slack renders these as the user's current display
+  // name with avatar, so we don't have to keep our `name` column in sync with
+  // profile changes.
+  const lines = rows.map((r, i) => `${i + 1}. <@${r.id}> — ${r.received} 🌮`);
   return ["*Top taco receivers (lifetime)*", ...lines].join("\n");
 }
 
