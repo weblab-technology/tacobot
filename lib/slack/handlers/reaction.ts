@@ -7,6 +7,7 @@ import { decide, validate, type GiverState, type GivePlan } from "../give";
 import { executeGive } from "../execute";
 import { getBotUserId } from "../botUserId";
 import { resolveUserName } from "../userInfo";
+import { findUserIds } from "../parser";
 import {
   giveSuccessGiverMessage,
   giveSuccessRecipientMessage,
@@ -33,21 +34,27 @@ export async function processReaction(database: DbLike, input: ReactionInput): P
     return { kind: "ignore", reason: "channel_not_allowlisted" };
   }
   const botId = await getBotUserId();
-  if (input.author === botId || input.author === input.reactor) {
-    return { kind: "ignore", reason: "self_or_bot" };
+  if (input.author === botId) {
+    return { kind: "ignore", reason: "bot_author" };
   }
 
-  await ensureUserExists(database, { id: input.reactor, dailyAllowance: config.taco.dailyAllowance });
-  await ensureUserExists(database, { id: input.author, dailyAllowance: config.taco.dailyAllowance });
-  const [reactorName, authorName] = await Promise.all([
-    resolveUserName(input.reactor),
-    resolveUserName(input.author),
-  ]);
-  if (reactorName) {
-    await upsertUser(database, { id: input.reactor, name: reactorName, dailyAllowance: config.taco.dailyAllowance });
+  // Reactions on a message that mentions users credit the mentioned users
+  // (the reactor is endorsing the gift). When no one is mentioned, fall back
+  // to crediting the message author. The bot itself is never a recipient.
+  const mentioned = findUserIds(input.messageText ?? "").filter((id) => id !== botId);
+  const recipientIds = mentioned.length > 0 ? mentioned : [input.author];
+
+  const allKnownIds = [input.reactor, input.author, ...recipientIds];
+  const uniqueIds = [...new Set(allKnownIds)];
+  for (const id of uniqueIds) {
+    await ensureUserExists(database, { id, dailyAllowance: config.taco.dailyAllowance });
   }
-  if (authorName) {
-    await upsertUser(database, { id: input.author, name: authorName, dailyAllowance: config.taco.dailyAllowance });
+  const resolvedNames = await Promise.all(uniqueIds.map((id) => resolveUserName(id)));
+  for (let i = 0; i < uniqueIds.length; i++) {
+    const name = resolvedNames[i];
+    if (name) {
+      await upsertUser(database, { id: uniqueIds[i], name, dailyAllowance: config.taco.dailyAllowance });
+    }
   }
 
   const [reactorRow] = await database.select().from(users).where(eq(users.id, input.reactor));
@@ -62,7 +69,7 @@ export async function processReaction(database: DbLike, input: ReactionInput): P
   const v = validate(
     {
       giverId: input.reactor,
-      recipientIds: [input.author],
+      recipientIds,
       tacoCount: 1,
       channelId: input.channelId,
       slackEventId: `react-${input.channelId}-${input.messageTs}-${input.reactor}`,
