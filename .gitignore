@@ -25,6 +25,9 @@ coverage/
 .vscode/
 .DS_Store
 
+# Claude Code (per-user overrides)
+.claude/settings.local.json
+
 # Legacy (no longer applicable but historically present)
 config.js
 db.json
