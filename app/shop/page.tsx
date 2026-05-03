@@ -36,6 +36,11 @@ export default async function ShopPage() {
               {it.description ? (
                 <p className="mt-2 text-sm text-gray-600">{it.description}</p>
               ) : null}
+              {it.quantity !== null ? (
+                <p className="mt-2 text-xs text-gray-500">
+                  {it.quantity} available
+                </p>
+              ) : null}
             </li>
           ))}
         </ul>

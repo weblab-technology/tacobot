@@ -45,12 +45,18 @@ export const items = pgTable(
     description: text("description"),
     imageUrl: text("image_url"),
     priceTacos: integer("price_tacos").notNull(),
+    quantity: integer("quantity"),
+    redemptionInstructions: text("redemption_instructions"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     pricePositive: check("items_price_positive", sql`${t.priceTacos} > 0`),
+    quantityPositive: check(
+      "items_quantity_positive",
+      sql`${t.quantity} IS NULL OR ${t.quantity} > 0`,
+    ),
     activeNameUnique: uniqueIndex("items_active_name_unique")
       .on(sql`lower(${t.name})`)
       .where(sql`${t.isActive}`),

@@ -38,6 +38,7 @@ export async function listActiveItems(db: DbLike) {
       description: items.description,
       imageUrl: items.imageUrl,
       priceTacos: items.priceTacos,
+      quantity: items.quantity,
     })
     .from(items)
     .where(eq(items.isActive, true))

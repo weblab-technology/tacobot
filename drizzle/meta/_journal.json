@@ -8,6 +8,13 @@
       "when": 1777750251652,
       "tag": "0000_overconfident_skrulls",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1777839072378,
+      "tag": "0001_slim_rockslide",
+      "breakpoints": true
     }
   ]
 }
