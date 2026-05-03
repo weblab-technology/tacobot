@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { config } from "@/lib/config";
 import { db } from "@/lib/db/client";
 import { listActiveItems } from "@/lib/db/queries";
 
@@ -12,12 +13,26 @@ export const metadata: Metadata = {
 export default async function ShopPage() {
   const items = await listActiveItems(db);
 
+  const hrId = config.hr.slackId;
+  const hrHandle = config.hr.slackHandle;
+  const hrLabel = hrHandle ? `@${hrHandle}` : "HR";
+  const hrContact = hrId ? (
+    <a
+      href={`https://slack.com/app_redirect?channel=${hrId}`}
+      className="font-medium text-amber-700 hover:underline"
+    >
+      {hrLabel}
+    </a>
+  ) : (
+    hrLabel
+  );
+
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
       <header className="mb-8">
         <h1 className="text-3xl font-bold">🌮 Tacobot Shop</h1>
         <p className="mt-2 text-gray-600">
-          Earn tacos by being recognized in <code>#taqueria</code>. To redeem an item, DM HR with the item name.
+          Earn tacos by being recognized in <code>#taqueria</code>. To redeem an item, DM {hrContact} with the item name.
           Check your balance by DMing <code>@tacobot</code> the word <code>balance</code>.
         </p>
       </header>
