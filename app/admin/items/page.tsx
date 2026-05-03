@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Image from "next/image";
 import { db } from "@/lib/db/client";
 import { items } from "@/lib/db/schema";
@@ -6,6 +7,10 @@ import { createItem, toggleItemActive, updateItem } from "./actions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  title: "Items catalog",
+};
 
 const fieldLabel = "block text-xs font-medium text-gray-700 mb-1";
 const fieldInput = "w-full rounded border border-gray-300 px-3 py-2";

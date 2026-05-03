@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { asc, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { items, users } from "@/lib/db/schema";
@@ -5,6 +6,10 @@ import { deductTacos } from "./actions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  title: "Users & redemption",
+};
 
 export default async function UsersPage() {
   const [allUsers, activeItems] = await Promise.all([
