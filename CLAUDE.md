@@ -22,6 +22,7 @@ app/
   admin/users/{page,actions}.tsx   User table + redemption form (deductTacos)
   admin/items/{page,actions}.tsx   Items CRUD + Vercel Blob upload
   admin/activity/page.tsx          Chronological feed of give events with reversal status, channel filter, cursor pagination
+  admin/leaderboard/page.tsx       Ranked list of givers/receivers with metric (received/given/combined), period, and channel filters
   api/auth/[...nextauth]/route.ts  Auth.js handlers
   api/slack/events/route.ts        Bolt webhook: getReceiver().handle(req)
   api/cron/reset-allowance/        Daily reset; verified via Bearer ${CRON_SECRET}
@@ -32,7 +33,7 @@ lib/
   db/
     client.ts                      Drizzle client over @vercel/postgres
     schema.ts                      users, items, transactions; CHECK constraints
-    queries.ts                     upsertUser, ensureUserExists, listActiveItems
+    queries.ts                     upsertUser, ensureUserExists, listActiveItems, getLeaderboard
     types.ts                       DbLike (Postgres / pglite-compatible)
   slack/
     bolt.ts                        Lazy singleton App + Receiver factories

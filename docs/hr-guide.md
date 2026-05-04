@@ -18,7 +18,7 @@ If you can't sign in or the shop doesn't show your handle, ask your operator to 
 
 1. Go to `https://<your-deploy-host>/admin`. (Your operator will tell you the URL — typically `tacobot.<your-domain>` or a `vercel.app` host.)
 2. You'll be redirected to **Sign in with Slack**. Approve the OAuth prompt with the workspace account whose Slack ID is in `ADMIN_SLACK_IDS`.
-3. After sign-in you land on `/admin` with two links: **Users** and **Items**.
+3. After sign-in you land on `/admin` with links to **Activity**, **Leaderboard**, **Users**, and **Items**.
 
 If sign-in bounces you straight back to the sign-in page, your Slack ID isn't on the allowlist. Confirm with your operator. (The system rejects non-admin sign-ins at the OAuth step on purpose — non-admins never get a session, so there's nothing for them to "explore" if they happen to land on `/admin`.)
 
@@ -27,6 +27,7 @@ If sign-in bounces you straight back to the sign-in page, your Slack ID isn't on
 - `/admin/items` — manage the shop catalog (what employees can spend tacos on).
 - `/admin/users` — see balances and process redemptions.
 - `/admin/activity` — chronological feed of every give in the workspace, with reversal status, channel filter, and clickable links into Slack. Read-only; useful for context ("who gave what to whom recently?") and for spot-checking that the bot is behaving.
+- `/admin/leaderboard` — ranked list of who's received, given, or combined the most tacos, filterable by period (today / this week / this month / all-time) and channel. Read-only; great for celebrating top contributors.
 
 You can navigate between them via the header. **Sign out** is also in the header — use it on shared devices.
 

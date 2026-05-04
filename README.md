@@ -12,7 +12,7 @@ Give 🌮 reactions to teammates in `#taqueria`. Every employee has a daily allo
 - **Two counters per user**: lifetime `received_total` (for the leaderboard) and current `balance` (redeemable).
 - **DM commands**: `score`, `balance`, `left`, `shop`, `help` — English and French aliases.
 - **Public shop**: `/shop` lists active items with prices, descriptions, and a "DM HR" link.
-- **Admin console**: `/admin/items` (catalog CRUD with image upload), `/admin/users` (redemption form), and `/admin/activity` (chronological give feed with reversal status, channel filter, and Slack deep-links). All gated by Sign in with Slack against `ADMIN_SLACK_IDS`.
+- **Admin console**: `/admin/items` (catalog CRUD with image upload), `/admin/users` (redemption form), `/admin/activity` (chronological give feed with reversal status, channel filter, and Slack deep-links), and `/admin/leaderboard` (ranked list with metric/period/channel filters). All gated by Sign in with Slack against `ADMIN_SLACK_IDS`.
 - **Append-only audit log**: every give, redemption, and reversal is a row in `transactions` with the channel, message timestamp, admin, item, and reason.
 - **Reversible gives**: deleting your `:taco:` message or removing your 🌮 reaction writes a compensating `type='reversal'` row, decrements the recipient's balance, restores your daily allowance (capped at the daily cap), and DMs both parties.
 - **Slack-retry idempotent**: each individual taco has a unique `slack_event_id`; retries are no-ops, not duplicates. Reversals additionally key on `reversed_transaction_id` so a single give can be reversed at most once.
