@@ -142,3 +142,28 @@ test("given: ranks active givers by net amount given, with reversals subtracted"
     ]);
   });
 });
+
+test("combined: sums received + given per user; giver-only and receiver-only both rank", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_BOTH", name: "Both", dailyAllowance: 50 });
+    await upsertUser(tx, { id: "U_GIVER_ONLY", name: "Giver", dailyAllowance: 50 });
+    await upsertUser(tx, { id: "U_RECV_ONLY", name: "Recv", dailyAllowance: 5 });
+
+    // U_BOTH gives 2 to U_RECV_ONLY, receives 4 from U_GIVER_ONLY → combined 6
+    await seedGive(tx, { fromId: "U_BOTH", toId: "U_RECV_ONLY", amount: 2, eventId: "b1" });
+    await seedGive(tx, { fromId: "U_GIVER_ONLY", toId: "U_BOTH", amount: 4, eventId: "g1" });
+    // U_GIVER_ONLY gives 1 more to U_RECV_ONLY → given 5 total
+    await seedGive(tx, { fromId: "U_GIVER_ONLY", toId: "U_RECV_ONLY", amount: 1, eventId: "g2" });
+
+    const rows = await getLeaderboard(tx, { metric: "combined", since: null, channel: null });
+
+    // U_BOTH: 4 received + 2 given = 6
+    // U_GIVER_ONLY: 0 received + 5 given = 5
+    // U_RECV_ONLY: 3 received + 0 given = 3
+    expect(rows).toEqual([
+      { userId: "U_BOTH", total: 6 },
+      { userId: "U_GIVER_ONLY", total: 5 },
+      { userId: "U_RECV_ONLY", total: 3 },
+    ]);
+  });
+});
