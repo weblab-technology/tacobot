@@ -25,8 +25,11 @@ export const users = pgTable(
   },
   (t) => ({
     dailyNonNegative: check("users_daily_remaining_nonneg", sql`${t.dailyRemaining} >= 0`),
-    receivedNonNegative: check("users_received_total_nonneg", sql`${t.receivedTotal} >= 0`),
-    balanceNonNegative: check("users_balance_nonneg", sql`${t.balance} >= 0`),
+    // `received_total` and `balance` may go negative after a reversal of a give
+    // whose recipient already redeemed: the give that funded the redemption is
+    // undone, but the redemption itself stays. The relationship `balance <=
+    // received_total` is preserved because reversals decrement both by the
+    // same amount.
     balanceLeReceived: check(
       "users_balance_le_received",
       sql`${t.balance} <= ${t.receivedTotal}`,
@@ -66,7 +69,7 @@ export const items = pgTable(
 export type Item = typeof items.$inferSelect;
 export type NewItem = typeof items.$inferInsert;
 
-export const transactionType = ["give", "redeem"] as const;
+export const transactionType = ["give", "redeem", "reversal"] as const;
 export type TransactionType = (typeof transactionType)[number];
 
 export const transactions = pgTable(
@@ -83,6 +86,9 @@ export const transactions = pgTable(
     slackEventId: text("slack_event_id").unique(),
     slackChannelId: text("slack_channel_id"),
     slackMessageTs: text("slack_message_ts"),
+    // For type='reversal' rows only: the give being reversed. UNIQUE so any
+    // single give can only be compensated once, even under retries.
+    reversedTransactionId: uuid("reversed_transaction_id").unique(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -94,18 +100,30 @@ export const transactions = pgTable(
           AND ${t.fromUserId} IS NOT NULL
           AND ${t.adminUserId} IS NULL
           AND ${t.itemId} IS NULL
+          AND ${t.reversedTransactionId} IS NULL
           AND ${t.fromUserId} <> ${t.toUserId})
         OR
         (${t.type} = 'redeem'
           AND ${t.fromUserId} IS NULL
           AND ${t.adminUserId} IS NOT NULL
-          AND ${t.itemId} IS NOT NULL)
+          AND ${t.itemId} IS NOT NULL
+          AND ${t.reversedTransactionId} IS NULL)
+        OR
+        (${t.type} = 'reversal'
+          AND ${t.fromUserId} IS NULL
+          AND ${t.adminUserId} IS NULL
+          AND ${t.itemId} IS NULL
+          AND ${t.reversedTransactionId} IS NOT NULL)
       )`,
     ),
     toCreatedIdx: index("transactions_to_created").on(t.toUserId, t.createdAt),
     fromCreatedIdx: index("transactions_from_created").on(t.fromUserId, t.createdAt),
     typeCreatedIdx: index("transactions_type_created").on(t.type, t.createdAt),
     adminCreatedIdx: index("transactions_admin_created").on(t.adminUserId, t.createdAt),
+    channelMsgIdx: index("transactions_channel_message").on(
+      t.slackChannelId,
+      t.slackMessageTs,
+    ),
   }),
 );
 

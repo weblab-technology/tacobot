@@ -1,4 +1,5 @@
 import type { GivePlan } from "./give";
+import type { ReversedItem } from "./reverse";
 
 export function overAllowanceMessage(demand: number, remaining: number): string {
   return `🌮 You've only got ${remaining} taco${remaining === 1 ? "" : "s"} left today; that would need ${demand}. Try again tomorrow.`;
@@ -20,4 +21,51 @@ export function giveSuccessRecipientMessage(
   channelId: string,
 ): string {
   return `You received ${amount} taco${amount === 1 ? "" : "s"} from <@${giverId}> in <#${channelId}>.`;
+}
+
+// Neutral wording: a deleter's text-mention give and a reactor's reaction-give
+// can both end up reversed by the same `message_deleted` event, so the DM has
+// to read correctly for both audiences (the actor of the original give isn't
+// always the deleter).
+export function messageDeletedGiverMessage(items: ReversedItem[], channelId: string): string {
+  const lines = items.map(
+    (i) => `<@${i.recipientId}> lost ${i.amount} taco${i.amount === 1 ? "" : "s"}.`,
+  );
+  return [
+    `🌮 A message in <#${channelId}> was deleted; the tacos you gave in connection with it were taken back:`,
+    ...lines,
+  ].join("\n");
+}
+
+export function messageDeletedRecipientMessage(
+  giverId: string,
+  amount: number,
+  channelId: string,
+): string {
+  return `🌮 A message in <#${channelId}> was deleted; ${amount} taco${amount === 1 ? "" : "s"} you received from <@${giverId}> ${amount === 1 ? "was" : "were"} taken back.`;
+}
+
+export function reactionRemovedReactorMessage(
+  items: { recipientId: string; amount: number }[],
+  channelId: string,
+): string {
+  if (items.length === 1) {
+    const { recipientId, amount } = items[0];
+    return `🌮 You removed your :taco: reaction in <#${channelId}>; ${amount} taco${amount === 1 ? "" : "s"} ${amount === 1 ? "was" : "were"} taken back from <@${recipientId}>.`;
+  }
+  const lines = items.map(
+    (i) => `<@${i.recipientId}> lost ${i.amount} taco${i.amount === 1 ? "" : "s"}.`,
+  );
+  return [
+    `🌮 You removed your :taco: reaction in <#${channelId}>; reversed:`,
+    ...lines,
+  ].join("\n");
+}
+
+export function reactionRemovedRecipientMessage(
+  reactorId: string,
+  amount: number,
+  channelId: string,
+): string {
+  return `🌮 <@${reactorId}> removed their :taco: reaction in <#${channelId}>; ${amount} taco${amount === 1 ? "" : "s"} you received from them ${amount === 1 ? "was" : "were"} taken back.`;
 }

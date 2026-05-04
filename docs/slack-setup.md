@@ -35,8 +35,13 @@ Slack app dashboard → **OAuth & Permissions** → **Bot Token Scopes**. Add:
   - `message.im`
   - `app_mention`
   - `reaction_added`
+  - `reaction_removed`
   - `team_join`
   - `user_change`
+
+  `message.channels` covers both new messages and `message_deleted`
+  subtype events — Slack delivers deletions through the same event type.
+  `reaction_removed` is a separate subscription.
 
 Save changes. Slack issues a verification challenge against the request URL; the route handler echoes it back. Confirm the green check.
 

@@ -5,6 +5,7 @@ import type { DbLike } from "@/lib/db/types";
 import { config } from "@/lib/config";
 import { decide, validate, type GiverState, type GivePlan } from "../give";
 import { executeGive } from "../execute";
+import { executeReactionReversal } from "../reverse";
 import { getBotUserId } from "../botUserId";
 import { resolveUserName } from "../userInfo";
 import { findUserIds } from "../parser";
@@ -12,6 +13,8 @@ import {
   giveSuccessGiverMessage,
   giveSuccessRecipientMessage,
   overAllowanceMessage,
+  reactionRemovedReactorMessage,
+  reactionRemovedRecipientMessage,
 } from "../format";
 import { eq } from "drizzle-orm";
 import { users } from "@/lib/db/schema";
@@ -166,6 +169,53 @@ export function registerReactionHandler(app: App) {
         });
       } catch (err) {
         console.warn("[chat.postMessage recipient] failed", err);
+      }
+    }
+  });
+
+  app.event("reaction_removed", async ({ event, client }) => {
+    if (event.reaction !== "taco") return;
+    if (event.item.type !== "message") return;
+
+    // No allowlist check on reversal: we look up by (channel, ts, reactor),
+    // so a non-matching channel naturally yields zero rows. Reversing a give
+    // that originated when the channel WAS allowlisted is still desirable.
+
+    const result = await executeReactionReversal(db, {
+      channelId: event.item.channel,
+      messageTs: event.item.ts,
+      reactor: event.user,
+      dailyAllowance: config.taco.dailyAllowance,
+    });
+
+    if (result.kind !== "ok") return;
+
+    // A single reaction can produce multiple give rows when the message
+    // mentioned multiple users; sum per recipient so each one gets a single,
+    // tidy DM rather than one per underlying row.
+    const perRecipient = new Map<string, number>();
+    for (const item of result.reversed) {
+      perRecipient.set(item.recipientId, (perRecipient.get(item.recipientId) ?? 0) + item.amount);
+    }
+    const reactorItems = [...perRecipient].map(([recipientId, amount]) => ({ recipientId, amount }));
+
+    try {
+      await client.chat.postMessage({
+        channel: event.user,
+        text: reactionRemovedReactorMessage(reactorItems, event.item.channel),
+      });
+    } catch (err) {
+      console.warn("[chat.postMessage reversal reactor] failed", err);
+    }
+
+    for (const [rid, amount] of perRecipient) {
+      try {
+        await client.chat.postMessage({
+          channel: rid,
+          text: reactionRemovedRecipientMessage(event.user, amount, event.item.channel),
+        });
+      } catch (err) {
+        console.warn("[chat.postMessage reversal recipient] failed", err);
       }
     }
   });

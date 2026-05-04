@@ -80,11 +80,11 @@ Three tables in `lib/db/schema.ts`. Constraints are enforced at the database lay
 CHECK constraints:
 
 - `daily_remaining >= 0`
-- `received_total >= 0`
-- `balance >= 0`
 - `balance <= received_total`
 
-The last one is the load-bearing invariant: a user can never spend more than they were given. Combined with the redeem flow's `WHERE balance >= amount`, you cannot overdraw even with concurrent admin requests.
+`balance` and `received_total` may go *negative* after a reversal of a give whose recipient already redeemed: the give that funded the redemption is undone, but the redemption itself stays. Both columns are decremented together by the reversal, so the `balance <= received_total` relationship is preserved. The redeem flow's `WHERE balance >= amount` (in `lib/admin/redeem.ts`) is what prevents *spending* into the negative; only reversals can push the counters below zero.
+
+The remaining `balance <= received_total` invariant is load-bearing: a user can never spend more than they have on hand. Combined with the redeem flow's `WHERE balance >= amount`, you cannot overdraw even with concurrent admin requests.
 
 ### `items`
 
@@ -104,40 +104,48 @@ Plus a partial unique index: `lower(name)` is unique among `is_active = true`. T
 
 ### `transactions`
 
-The append-only audit log. Every `give` and every `redeem` adds rows here.
+The append-only audit log. Every `give`, every `redeem`, and every `reversal` adds rows here. Reversals compensate gives via a foreign key on `reversed_transaction_id` — we never UPDATE or DELETE existing rows.
 
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | uuid PK | |
-| `type` | text NN | `'give'` or `'redeem'`. |
-| `to_user_id` | text NN, FK → users | Always set. |
-| `from_user_id` | text, FK → users | Set for `give`, NULL for `redeem`. |
-| `admin_user_id` | text, FK → users | Set for `redeem`, NULL for `give`. |
-| `item_id` | uuid, FK → items | Set for `redeem`, NULL for `give`. |
-| `amount` | int NN | CHECK > 0. |
-| `reason` | text | Free text — message body for gives, admin note for redeems. |
-| `slack_event_id` | text UNIQUE | Composite key for idempotency (see below). |
-| `slack_channel_id` | text | Where the give happened (NULL for redeems). |
-| `slack_message_ts` | text | The message Slack timestamp (NULL for redeems). |
+| `type` | text NN | `'give'`, `'redeem'`, or `'reversal'`. |
+| `to_user_id` | text NN, FK → users | Always set. For `reversal`, this is the original recipient (whose counters are decremented). |
+| `from_user_id` | text, FK → users | Set for `give`, NULL for `redeem` and `reversal`. |
+| `admin_user_id` | text, FK → users | Set for `redeem`, NULL for `give` and `reversal`. |
+| `item_id` | uuid, FK → items | Set for `redeem`, NULL for `give` and `reversal`. |
+| `amount` | int NN | CHECK > 0. For `reversal`, mirrors the original give's amount. |
+| `reason` | text | Free text — message body for gives, admin note for redeems, `'message_deleted'` / `'reaction_removed'` for reversals. |
+| `slack_event_id` | text UNIQUE | Idempotency key (see below). |
+| `slack_channel_id` | text | Where the give happened (NULL for redeems). Mirrored on reversals. |
+| `slack_message_ts` | text | The message Slack timestamp (NULL for redeems). Mirrored on reversals. |
+| `reversed_transaction_id` | uuid UNIQUE | Set for `reversal` only — points at the give being compensated. UNIQUE so any single give can be reversed at most once. |
 | `created_at` | timestamptz | |
 
-Two composite checks make the row shape watertight:
+Three composite checks make the row shape watertight:
 
 ```sql
 CHECK (
-  (type = 'give'   AND from_user_id IS NOT NULL
-                   AND admin_user_id IS NULL
-                   AND item_id IS NULL
-                   AND from_user_id <> to_user_id)
+  (type = 'give'     AND from_user_id IS NOT NULL
+                     AND admin_user_id IS NULL
+                     AND item_id IS NULL
+                     AND reversed_transaction_id IS NULL
+                     AND from_user_id <> to_user_id)
   OR
-  (type = 'redeem' AND from_user_id IS NULL
-                   AND admin_user_id IS NOT NULL
-                   AND item_id IS NOT NULL)
+  (type = 'redeem'   AND from_user_id IS NULL
+                     AND admin_user_id IS NOT NULL
+                     AND item_id IS NOT NULL
+                     AND reversed_transaction_id IS NULL)
+  OR
+  (type = 'reversal' AND from_user_id IS NULL
+                     AND admin_user_id IS NULL
+                     AND item_id IS NULL
+                     AND reversed_transaction_id IS NOT NULL)
 )
 CHECK (amount > 0)
 ```
 
-Indexes: `(to_user_id, created_at)`, `(from_user_id, created_at)`, `(type, created_at)`, `(admin_user_id, created_at)` — chosen for the audit queries in `operations.md`.
+Indexes: `(to_user_id, created_at)`, `(from_user_id, created_at)`, `(type, created_at)`, `(admin_user_id, created_at)`, `(slack_channel_id, slack_message_ts)` — the last one supports the reversal lookup on `message_deleted` events.
 
 #### Why one row per taco
 
@@ -205,14 +213,35 @@ Initiated by an admin in `/admin/users`.
 
 There is no "undo redemption" UI by design — the audit log is append-only. To compensate, give the user a `give` from a workspace admin's Slack account or have an engineer issue a correcting `redeem` row with a clear `reason`.
 
+## Reversal flow trace
+
+Gives — but not redemptions — are reversible:
+
+- **`message_deleted`** (`lib/slack/handlers/message.ts`): the original Slack message that produced gives is gone. We look up every `type='give'` transaction with matching `(slack_channel_id, slack_message_ts)` (catches both text-mention gives and `:taco:` reactions left on the message) and call `executeMessageReversal` (`lib/slack/reverse.ts`).
+- **`reaction_removed`** (`lib/slack/handlers/reaction.ts`): the reactor took back their `:taco:` reaction. We look up `type='give'` rows matching `(slack_channel_id, slack_message_ts, from_user_id=reactor)` and call `executeReactionReversal`.
+
+Both functions follow the same pattern, mirroring `executeGive`:
+
+1. Open a DB transaction.
+2. SELECT the candidate gives.
+3. For each give, INSERT a `type='reversal'` row with `reversed_transaction_id = give.id` and `slack_event_id = '<delete|unreact>-<give.id>'`. The UNIQUE on `reversed_transaction_id` is the primary idempotency lever — `onConflictDoNothing` makes a Slack retry a no-op for that specific give.
+4. Only when the INSERT returns a row (i.e. the reversal is new) do we update counters:
+   - Recipient: `balance -= amount, received_total -= amount` (allowed to go negative when the recipient already redeemed).
+   - Giver: `daily_remaining = LEAST(daily_remaining + amount, daily_allowance)`. The cap handles cross-midnight reversals where the cron has already topped the giver up — we never push past the daily allowance.
+
+The handlers DM the actor and the affected recipients on success. A noop (no rows matched, or every match was already reversed) is silent.
+
+`receivedTotal` and `balance` may end up negative after a reversal-of-an-already-redeemed give, by design (see the user-table CHECK note above).
+
 ## Idempotency model
 
 Slack will retry events that don't ack within 3 seconds, and operators sometimes replay events from the dashboard during debugging. Our defence is a single unique key per logical taco:
 
 - Message gives: `${event.event_ts}-${idx}` for the i-th recipient.
-- Reaction gives: `react-${channel}-${messageTs}-${reactor}`.
+- Reaction gives: `react-${channel}-${messageTs}-${reactor}-${idx}` (the `-${idx}` suffix supports reactions on multi-mention messages).
+- Reversals: `delete-${original.id}` for `message_deleted`, `unreact-${original.id}` for `reaction_removed`. The UNIQUE on `reversed_transaction_id` is the primary lever; this column-level UNIQUE is just for traceability and a safety belt.
 
-The `transactions.slack_event_id` UNIQUE constraint plus `onConflictDoNothing` makes the insert a no-op on retry. Crucially, the `WHERE inserted.length === 0` check inside the transaction throws `DuplicateGiveError` so the *whole give* rolls back — including the giver's `daily_remaining` decrement. Without that rollback, a retry would double-debit the giver.
+The `transactions.slack_event_id` UNIQUE constraint plus `onConflictDoNothing` makes the insert a no-op on retry. For gives, the `WHERE inserted.length === 0` check inside the transaction throws `DuplicateGiveError` so the *whole give* rolls back — including the giver's `daily_remaining` decrement. Without that rollback, a retry would double-debit the giver. Reversals use a per-row pattern: each give is reversed independently, and a duplicate `INSERT` on `reversed_transaction_id` skips the counter updates for that specific row while still committing other progress in the same batch.
 
 The flow is convergent: the same event delivered N times produces the same final database state.
 

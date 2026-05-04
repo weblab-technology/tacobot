@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Fragment } from "react";
 import { and, desc, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
+import { countReversalsPerGiveGroup } from "@/lib/db/queries";
 import { transactions, users } from "@/lib/db/schema";
 import { resolveChannelName } from "@/lib/slack/channelInfo";
 import { resolveUserName } from "@/lib/slack/userInfo";
@@ -66,6 +67,20 @@ export default async function ActivityPage({ searchParams }: { searchParams: Sea
 
   const hasMore = giveEvents.length > PAGE_SIZE;
   const visibleEvents = hasMore ? giveEvents.slice(0, PAGE_SIZE) : giveEvents;
+
+  // For each visible give-group `(fromUserId, channel, ts)`, count how many
+  // of its underlying give rows have a matching reversal. Per-giver — see
+  // `countReversalsPerGiveGroup` for why.
+  const reversedCountByKey = await countReversalsPerGiveGroup(
+    db,
+    visibleEvents
+      .filter((e) => e.fromUserId && e.slackChannelId && e.slackMessageTs)
+      .map((e) => ({
+        fromUserId: e.fromUserId!,
+        slackChannelId: e.slackChannelId!,
+        slackMessageTs: e.slackMessageTs!,
+      })),
+  );
 
   // Collect every user id we'll need a name for: givers, recipients, and any
   // <@USERID> mention inside a body.
@@ -156,6 +171,7 @@ export default async function ActivityPage({ searchParams }: { searchParams: Sea
           events={visibleEvents}
           nameById={nameById}
           channelLabelById={channelLabelById}
+          reversedCountByKey={reversedCountByKey}
         />
       )}
 
@@ -182,6 +198,7 @@ export default async function ActivityPage({ searchParams }: { searchParams: Sea
 type GiveEventRow = {
   fromUserId: string | null;
   slackChannelId: string | null;
+  slackMessageTs: string | null;
   slackEventId: string;
   reason: string | null;
   totalAmount: number;
@@ -194,10 +211,12 @@ function ActivityList({
   events,
   nameById,
   channelLabelById,
+  reversedCountByKey,
 }: {
   events: GiveEventRow[];
   nameById: Map<string, string>;
   channelLabelById: Map<string, string | null>;
+  reversedCountByKey: Map<string, number>;
 }) {
   const out: React.ReactNode[] = [];
   let lastDayKey: string | null = null;
@@ -212,7 +231,17 @@ function ActivityList({
       );
       lastDayKey = dayKey;
     }
-    out.push(<ActivityRow key={e.slackEventId} event={e} nameById={nameById} channelLabelById={channelLabelById} />);
+    const reversedCount =
+      reversedCountByKey.get(`${e.fromUserId}|${e.slackChannelId}|${e.slackMessageTs}`) ?? 0;
+    out.push(
+      <ActivityRow
+        key={e.slackEventId}
+        event={e}
+        nameById={nameById}
+        channelLabelById={channelLabelById}
+        reversedCount={reversedCount}
+      />,
+    );
   }
   return <div className="space-y-3">{out}</div>;
 }
@@ -221,10 +250,12 @@ function ActivityRow({
   event,
   nameById,
   channelLabelById,
+  reversedCount,
 }: {
   event: GiveEventRow;
   nameById: Map<string, string>;
   channelLabelById: Map<string, string | null>;
+  reversedCount: number;
 }) {
   const ts = new Date(event.createdAt);
   const giverName = displayName(event.fromUserId, nameById);
@@ -233,6 +264,8 @@ function ActivityRow({
   const tacoWord = perRecipient === 1 ? "taco" : "tacos";
   const channelName = event.slackChannelId ? channelLabelById.get(event.slackChannelId) : null;
   const showBody = event.reason && event.reason !== "reaction";
+  const fullyReversed = reversedCount > 0 && reversedCount >= event.recipientCount;
+  const partiallyReversed = reversedCount > 0 && reversedCount < event.recipientCount;
 
   return (
     <div className="flex gap-3 rounded-lg border border-gray-200 bg-white p-3">
@@ -240,14 +273,23 @@ function ActivityRow({
       <div className="min-w-0 flex-1">
         <div className="text-sm">
           <UserMention id={event.fromUserId} nameById={nameById} bold />
-          <span className="text-gray-700">
+          <span className={fullyReversed ? "text-gray-500 line-through" : "text-gray-700"}>
             {" "}gave {perRecipient} {tacoWord}
             {isReaction ? " reaction" : ""} to{" "}
           </span>
-          <RecipientList ids={event.recipientIds} nameById={nameById} />
-          <span className="text-gray-700"> in </span>
+          <RecipientList ids={event.recipientIds} nameById={nameById} strikethrough={fullyReversed} />
+          <span className={fullyReversed ? "text-gray-500 line-through" : "text-gray-700"}> in </span>
           <ChannelMention id={event.slackChannelId} name={channelName ?? null} />
           <span className="text-gray-400"> {formatTimeOfDay(ts)}</span>
+          {fullyReversed ? (
+            <span className="ml-2 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+              ↺ reversed
+            </span>
+          ) : partiallyReversed ? (
+            <span className="ml-2 inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+              ↺ partially reversed ({reversedCount}/{event.recipientCount})
+            </span>
+          ) : null}
         </div>
         {showBody ? (
           <div className="mt-1 whitespace-pre-wrap break-words text-sm text-gray-700">
@@ -278,17 +320,25 @@ function UserMention({
   );
 }
 
-function RecipientList({ ids, nameById }: { ids: string[]; nameById: Map<string, string> }) {
+function RecipientList({
+  ids,
+  nameById,
+  strikethrough = false,
+}: {
+  ids: string[];
+  nameById: Map<string, string>;
+  strikethrough?: boolean;
+}) {
   if (ids.length === 0) return <span className="text-gray-500">(no one)</span>;
   return (
-    <>
+    <span className={strikethrough ? "line-through" : undefined}>
       {ids.map((id, i) => (
         <Fragment key={id}>
           {i > 0 ? <span className="text-gray-700">{i === ids.length - 1 ? " and " : ", "}</span> : null}
           <UserMention id={id} nameById={nameById} />
         </Fragment>
       ))}
-    </>
+    </span>
   );
 }
 

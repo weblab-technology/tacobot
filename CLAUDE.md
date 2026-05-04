@@ -37,12 +37,13 @@ lib/
     bolt.ts                        Lazy singleton App + Receiver factories
     receiver.ts                    AppRouterReceiver: HMAC verify, URL handshake
     handlers.ts                    registerAllHandlers() — wires the four below
-    handlers/message.ts            Channel `:taco:` mention → give
-    handlers/reaction.ts           `reaction_added` (taco emoji) → 1-taco give
+    handlers/message.ts            Channel `:taco:` mention → give; `message_deleted` → reverse all gives on that message
+    handlers/reaction.ts           `reaction_added` → 1-taco give; `reaction_removed` → reverse the reactor's give(s)
     handlers/commands.ts           App mentions + DMs: score/balance/left/shop/help
     handlers/userSync.ts           team_join + user_change → upsert/deactivate
     give.ts                        validate() + decide() — pure domain logic
     execute.ts                     executeGive() — transactional with idempotency
+    reverse.ts                     executeMessageReversal() / executeReactionReversal() — append-only compensation
     parser.ts                      countTacos, findUserIds
     format.ts                      Slack message strings
     userInfo.ts                    resolveUserName with 1h TTL + in-flight dedup
@@ -86,9 +87,10 @@ These are load-bearing. Don't paper over them — fix the underlying issue.
 - **URL-verification short-circuits** before Bolt dispatch in `lib/slack/receiver.ts`. Don't move signature-verify around it.
 - **HMAC-SHA256 signature verify** with a 5-minute replay window and `crypto.timingSafeEqual` (`lib/slack/receiver.ts:84`). The receiver reads the raw body via `req.text()` — never `req.json()` first, or the signature won't match.
 - **Atomic give** (`lib/slack/execute.ts:20`): `UPDATE users SET dailyRemaining = dailyRemaining - N WHERE id = … AND dailyRemaining >= N RETURNING id`. If the UPDATE returns 0 rows, the transaction rolls back as `over_allowance`. Never read-then-write.
-- **Atomic redeem** (`lib/admin/redeem.ts:17`): same pattern on `balance`. The DB CHECK (`balance >= 0`) is the second line of defence.
-- **Idempotency**: each individual taco is its own `transactions` row keyed by `slack_event_id` (composite: `${envelopeEventId}-${idx}` for messages, `react-${channel}-${ts}-${reactor}` for reactions). The unique-constraint + `onConflictDoNothing` makes Slack retries safe; if any insert returns 0 rows the whole give rolls back as `duplicate`.
-- **DB CHECK constraints** (`lib/db/schema.ts`): `dailyRemaining/receivedTotal/balance >= 0`, `balance <= receivedTotal`, `priceTacos > 0`, `quantity > 0 OR NULL`, unique `lower(name)` among active items, give-vs-redeem row shape (give has `fromUserId` and no admin/item, redeem has `adminUserId` + `itemId` and no `fromUserId`, no self-gives). Don't bypass with raw SQL.
+- **Atomic redeem** (`lib/admin/redeem.ts:17`): same pattern on `balance`. The atomic `WHERE balance >= amount` (not a DB CHECK — `balance >= 0` was relaxed) is what prevents overdraw on redemption.
+- **Append-only reversals** (`lib/slack/reverse.ts`): undoing a give writes a `type='reversal'` row referencing the original via `reversed_transaction_id` (UNIQUE). Counters update too: recipient's `balance`/`receivedTotal` decrement (allowed to go negative), giver's `daily_remaining` is restored capped at `dailyAllowance`. Never UPDATE/DELETE existing transactions — always insert compensation.
+- **Idempotency**: each individual taco is its own `transactions` row keyed by `slack_event_id`. Composite forms: `${envelopeEventId}-${idx}` for messages, `react-${channel}-${ts}-${reactor}-${idx}` for reactions, `delete-${original.id}` / `unreact-${original.id}` for reversals. The UNIQUE constraint + `onConflictDoNothing` makes Slack retries safe; for gives, if any insert returns 0 rows the whole give rolls back as `duplicate`. For reversals, per-row `onConflictDoNothing` on `reversed_transaction_id` lets a partial run resume cleanly.
+- **DB CHECK constraints** (`lib/db/schema.ts`): `dailyRemaining >= 0`, `balance <= receivedTotal`, `priceTacos > 0`, `quantity > 0 OR NULL`, unique `lower(name)` among active items, three-way row shape (give: `fromUserId` set, no admin/item/reversal-ref, no self-give; redeem: `adminUserId` + `itemId` set, no `fromUserId`/reversal-ref; reversal: only `toUserId` and `reversedTransactionId` set, plus UNIQUE on `reversedTransactionId` to block double-reversal). `balance` and `receivedTotal` *may* be negative — they decrement together when a give is reversed after the recipient has already redeemed. Don't bypass with raw SQL.
 - **Auth.js admin gate** (`lib/auth.ts:14`) lives in the `signIn` callback, not a layout redirect. Non-admins never get a session. The admin layout still redirects unauthenticated visitors to `/api/auth/signin?callbackUrl=/admin`.
 - **User-name freshness** (`lib/slack/userInfo.ts`): 1-hour TTL cache + in-flight dedup. Score/leaderboard renders `<@USERID>` mentions so Slack handles current display name + avatar — we never have to re-render the cached name.
 
@@ -112,6 +114,9 @@ These are load-bearing. Don't paper over them — fix the underlying issue.
 - The cron route accepts both POST and GET (Vercel's behaviour varies). Both verify `Authorization: Bearer ${CRON_SECRET}`.
 - The reaction handler resolves the message author via `conversations.history` (the `reaction_added` payload doesn't include it). Failure there silently drops the event.
 - Slack types `event` as a discriminated union — narrow with `if ("user" in event)` / `event.subtype === …` rather than casting.
+- **Re-react after unreact is silently ignored.** A reaction's give uses `slack_event_id = react-${channel}-${ts}-${reactor}-${idx}`, so removing then re-adding the same reaction tries to INSERT the identical key and `onConflictDoNothing` no-ops. The original give is permanently reversed; the new reaction has no effect. Pre-existing limitation; matches the same key collision that protects against Slack retries.
+- **Adding `reaction_removed` (or any new event)** means subscribing to it in the Slack app dashboard (`docs/slack-setup.md`) — not just registering it in `lib/slack/handlers.ts`.
+- **`message_deleted` reverses across the full message scope**, including `:taco:` reactions left by other people. The reactors are notified by DM. This matches Slack's own behavior (their reactions disappear with the message).
 
 ## Where things live for common tasks
 
@@ -122,6 +127,7 @@ These are load-bearing. Don't paper over them — fix the underlying issue.
 | Add a shop-item field | `lib/db/schema.ts` → `pnpm db:generate` → `app/admin/items/{page,actions}.tsx` → `app/shop/page.tsx` |
 | Change daily-reset time | `vercel.json` cron expression |
 | Change give/redeem rules | `lib/slack/give.ts` + `lib/slack/execute.ts` (or `lib/admin/redeem.ts`) |
+| Change reversal rules (delete/unreact) | `lib/slack/reverse.ts` + handlers in `lib/slack/handlers/{message,reaction}.ts` |
 | Bootstrap users from Slack | `pnpm sync-users` (`scripts/sync-users.ts`) |
 | Add an admin | env: `ADMIN_SLACK_IDS` (comma-separated Slack IDs) + redeploy |
 | Add the HR contact link to `/shop` | env: `HR_SLACK_ID` + `HR_SLACK_HANDLE` |
