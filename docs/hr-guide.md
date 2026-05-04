@@ -22,10 +22,11 @@ If you can't sign in or the shop doesn't show your handle, ask your operator to 
 
 If sign-in bounces you straight back to the sign-in page, your Slack ID isn't on the allowlist. Confirm with your operator. (The system rejects non-admin sign-ins at the OAuth step on purpose — non-admins never get a session, so there's nothing for them to "explore" if they happen to land on `/admin`.)
 
-## The two screens
+## The admin screens
 
-`/admin/items` — manage the shop catalog (what employees can spend tacos on).
-`/admin/users` — see balances and process redemptions.
+- `/admin/items` — manage the shop catalog (what employees can spend tacos on).
+- `/admin/users` — see balances and process redemptions.
+- `/admin/activity` — chronological feed of every give in the workspace, with reversal status, channel filter, and clickable links into Slack. Read-only; useful for context ("who gave what to whom recently?") and for spot-checking that the bot is behaving.
 
 You can navigate between them via the header. **Sign out** is also in the header — use it on shared devices.
 
@@ -131,6 +132,19 @@ employee gives/receives 🌮  ───►  balance accumulates
 ```
 
 The order of "fulfill" vs. "deduct" is your call. Some HR teams deduct first (to lock the tacos) and fulfill later; some fulfill first (to be sure the redemption "took"). The audit log records the deduction time, not the fulfillment time, so use the **Note** field to disambiguate if needed.
+
+## Browsing recent activity (`/admin/activity`)
+
+A chronological list of every give event, newest first, grouped by day. For each event you see:
+
+- The giver and recipient(s), as clickable Slack handles (open Slack DMs in one click).
+- The channel where the give happened (`#channel-name`), also clickable.
+- The amount per recipient and whether it was a typed message (with the message body shown) or a `:taco:` reaction (tagged "reaction").
+- A reversal pill if the give was undone: ↺ **reversed** (struck through) for a fully reversed event, or ↺ **partially reversed (N/M)** for one where only some recipients lost their taco.
+
+Use the **Filter** dropdown to scope the feed to one channel — handy when employees ask "did I really give Alice a taco in #marketing yesterday?". Click **Load older →** at the bottom to page back through history. The all-time total at the top is the lifetime gross sum (it does *not* subtract reversals; the per-row pills tell you which gives were undone).
+
+This page is read-only. There are no buttons to deduct, refund, or edit anything from here — it's a lens, not a tool. To act on what you see, use `/admin/users` (redemption) or ask the employee to delete/unreact (reversal).
 
 ## Common HR tasks
 

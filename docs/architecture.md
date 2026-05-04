@@ -55,7 +55,7 @@ How Tacobot is put together. Audience: engineers extending the codebase, on-call
 
 | Layer | Lives in | Responsibility |
 | --- | --- | --- |
-| HTTP boundary | `app/` | Next.js routes, server actions, Slack webhook entry, cron entry, Auth.js handlers. Thin — delegates immediately. |
+| HTTP boundary | `app/` | Next.js routes (landing, shop, admin items/users/activity), server actions, Slack webhook entry, cron entry, Auth.js handlers. Thin — delegates immediately. |
 | Slack domain | `lib/slack/` | Bolt setup, custom receiver, event handlers, parser, give validation/decision/execution, format helpers, user-info cache. |
 | Persistence | `lib/db/` | Drizzle schema, query helpers, structural type for the DB client. |
 | Privileged ops | `lib/admin/` | Redemption (admin-initiated balance deduction). |

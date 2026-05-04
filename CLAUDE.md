@@ -21,6 +21,7 @@ app/
   admin/page.tsx                   Admin home
   admin/users/{page,actions}.tsx   User table + redemption form (deductTacos)
   admin/items/{page,actions}.tsx   Items CRUD + Vercel Blob upload
+  admin/activity/page.tsx          Chronological feed of give events with reversal status, channel filter, cursor pagination
   api/auth/[...nextauth]/route.ts  Auth.js handlers
   api/slack/events/route.ts        Bolt webhook: getReceiver().handle(req)
   api/cron/reset-allowance/        Daily reset; verified via Bearer ${CRON_SECRET}
@@ -46,9 +47,11 @@ lib/
     reverse.ts                     executeMessageReversal() / executeReactionReversal() — append-only compensation
     parser.ts                      countTacos, findUserIds
     format.ts                      Slack message strings
+    channelInfo.ts                 resolveChannelName with 1h TTL + in-flight dedup
     userInfo.ts                    resolveUserName with 1h TTL + in-flight dedup
     botUserId.ts                   getBotUserId() singleton
   admin/redeem.ts                  redeem() — transactional balance deduction
+  date.ts                          formatDayHeading, formatTimeOfDay, localDayKey, periodStart (ISO Monday weeks, UTC boundaries)
 
 drizzle/                           Generated migrations (commit them)
 scripts/sync-users.ts              One-shot bootstrap from Slack users.list

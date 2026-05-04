@@ -22,6 +22,7 @@ Run this after every deploy. Use the beta channel listed in `TACO_CHANNELS` and 
 - [ ] Open `/shop` (logged out is fine) — items render. The HR contact link points at `HR_SLACK_HANDLE` (or the literal string "HR" if `HR_SLACK_ID` isn't set).
 - [ ] Sign in to `/admin/items` with an admin Slack account — add a test item with a name, price, and either an uploaded image or pasted URL. It appears on `/shop` (give ISR up to 60s, or hard-refresh).
 - [ ] Sign in to `/admin/users` — pick a test user, choose the new item, deduct tacos. Their `balance` drops, a `transactions` row is recorded with `type='redeem'`.
+- [ ] Open `/admin/activity` — your test gives appear at the top with the right giver/recipient/channel, the all-time total includes them, and the channel filter dropdown lists the test channel. Test gives you reversed earlier in this checklist show the ↺ **reversed** or ↺ **partially reversed** pill.
 - [ ] Sign-in attempt as a non-admin Slack account — bounces back to sign-in (no session is created).
 - [ ] Trigger `/api/cron/reset-allowance` manually with `Authorization: Bearer ${CRON_SECRET}` — response `{ updated: <count> }`. All active users' `daily_remaining` is back to `TACO_DAILY_ALLOWANCE`.
 
