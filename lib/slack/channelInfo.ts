@@ -31,7 +31,15 @@ export async function resolveChannelName(id: string): Promise<string | null> {
       if (name) cache.set(id, { name, fetchedAt: Date.now() });
       return name;
     } catch (err) {
-      console.warn(`[conversations.info] failed for ${id}`, err);
+      // Slack WebAPI errors carry a string code on err.data.error
+      // (e.g. "missing_scope", "channel_not_found", "not_in_channel").
+      // Surface it explicitly so missing scopes are easy to diagnose.
+      const code = (err as { data?: { error?: string } } | undefined)?.data?.error;
+      if (code) {
+        console.warn(`[conversations.info] ${id} -> ${code}`);
+      } else {
+        console.warn(`[conversations.info] failed for ${id}`, err);
+      }
       return null;
     } finally {
       inflight.delete(id);
