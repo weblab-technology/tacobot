@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { getLeaderboard, type LeaderboardMetric } from "@/lib/db/queries";
@@ -7,6 +6,7 @@ import { transactions, users } from "@/lib/db/schema";
 import { resolveChannelName } from "@/lib/slack/channelInfo";
 import { resolveUserName } from "@/lib/slack/userInfo";
 import { periodStart, type LeaderboardPeriod } from "@/lib/date";
+import FilterForm from "./FilterForm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -90,59 +90,14 @@ export default async function LeaderboardPage({ searchParams }: { searchParams: 
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Leaderboard</h1>
 
-      <form method="get" action="/admin/leaderboard" className="flex flex-wrap items-center gap-2 text-sm">
-        <label className="sr-only" htmlFor="metric">Metric</label>
-        <select
-          id="metric"
-          name="metric"
-          defaultValue={metric}
-          className="rounded border border-gray-300 px-2 py-1"
-        >
-          {METRIC_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-
-        <label className="sr-only" htmlFor="period">Period</label>
-        <select
-          id="period"
-          name="period"
-          defaultValue={period}
-          className="rounded border border-gray-300 px-2 py-1"
-        >
-          {PERIOD_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-
-        <label className="sr-only" htmlFor="channel">Channel</label>
-        <select
-          id="channel"
-          name="channel"
-          defaultValue={channel ?? ""}
-          className="rounded border border-gray-300 px-2 py-1"
-        >
-          <option value="">All channels</option>
-          {labeledChannels.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name ? `#${c.name}` : c.id}
-            </option>
-          ))}
-        </select>
-
-        <button type="submit" className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-100">
-          Apply
-        </button>
-        {metric !== "received" || period !== "all" || channel ? (
-          <Link href="/admin/leaderboard" className="text-gray-500 hover:text-gray-700 underline">
-            clear
-          </Link>
-        ) : null}
-      </form>
+      <FilterForm
+        metric={metric}
+        period={period}
+        channel={channel}
+        metricOptions={METRIC_OPTIONS}
+        periodOptions={PERIOD_OPTIONS}
+        channels={labeledChannels}
+      />
 
       {ranked.length === 0 ? (
         <p className="text-gray-500">No tacos in this view.</p>
