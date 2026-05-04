@@ -53,6 +53,7 @@ Copy `.env.example` to `.env.local` (for dev) or set them in Vercel project sett
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` | For Sign in with Slack (admin) |
 | `TACO_CHANNELS` | Comma-separated channel IDs where typed/reaction gives count |
 | `TACO_DAILY_ALLOWANCE` | Defaults to 5 |
+| `TACO_ALT_EMOJI_NAME` | Optional; custom emoji name (no colons) accepted as currency alongside `:taco:`. When set, the bot's confirmation reaction uses this emoji instead of `:taco:`. |
 | `ADMIN_SLACK_IDS` | Comma-separated Slack user IDs allowed into `/admin` |
 | `HR_SLACK_ID` | Optional; if set, `/shop` renders a clickable DM link to this Slack user |
 | `HR_SLACK_HANDLE` | Optional; display handle (without `@`) for the `/shop` HR contact |

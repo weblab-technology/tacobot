@@ -214,6 +214,35 @@ test("reaction with empty message text falls back to literal 'reaction'", async 
   });
 });
 
+test("two reactions on the same message by the same reactor collapse to one give", async () => {
+  // This protects the dual-emoji guarantee: the slack_event_id used for a
+  // reaction give is `react-${channel}-${ts}-${reactor}-${idx}` — it does NOT
+  // include the emoji name. So if a reactor adds :taco: AND :wltaco: on the
+  // same message, the second event collides on the UNIQUE key and rolls back
+  // as `duplicate`. If anyone changes the key shape to include the emoji,
+  // this test fails and forces a deliberate decision.
+  await withCleanDb(async (db) => {
+    await upsertUser(db, { id: "U_R", name: "R", dailyAllowance: 5 });
+    await upsertUser(db, { id: "U_A", name: "A", dailyAllowance: 5 });
+
+    const first = await processReaction(db, {
+      reactor: "U_R", author: "U_A", channelId: "C_TAQ", messageTs: "1700.0",
+    });
+    expect(first.kind).toBe("ok");
+
+    const second = await processReaction(db, {
+      reactor: "U_R", author: "U_A", channelId: "C_TAQ", messageTs: "1700.0",
+    });
+    expect(second.kind).toBe("ignore");
+    if (second.kind === "ignore") expect(second.reason).toBe("duplicate");
+
+    const [a] = await db.select().from(users).where(eq(users.id, "U_A"));
+    expect(a.balance).toBe(1); // only one give recorded
+    const txns = await db.select().from(transactions);
+    expect(txns).toHaveLength(1);
+  });
+});
+
 test("reaction outside allowlisted channel is ignored", async () => {
   await withCleanDb(async (db) => {
     await upsertUser(db, { id: "U_R", name: "R", dailyAllowance: 5 });

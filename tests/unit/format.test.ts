@@ -162,6 +162,29 @@ describe("reactionRemovedReactorMessage", () => {
       "🌮 You removed your :taco: reaction in <#C_TAQ>; reversed:\n<@U_A> lost 1 taco.\n<@U_B> lost 1 taco.",
     );
   });
+
+  test("echoes the alt emoji name when provided (single recipient)", () => {
+    expect(
+      reactionRemovedReactorMessage([{ recipientId: "U_R", amount: 1 }], "C_TAQ", "wltaco"),
+    ).toBe(
+      "🌮 You removed your :wltaco: reaction in <#C_TAQ>; 1 taco was taken back from <@U_R>.",
+    );
+  });
+
+  test("echoes the alt emoji name when provided (multi recipient)", () => {
+    expect(
+      reactionRemovedReactorMessage(
+        [
+          { recipientId: "U_A", amount: 1 },
+          { recipientId: "U_B", amount: 1 },
+        ],
+        "C_TAQ",
+        "wltaco",
+      ),
+    ).toBe(
+      "🌮 You removed your :wltaco: reaction in <#C_TAQ>; reversed:\n<@U_A> lost 1 taco.\n<@U_B> lost 1 taco.",
+    );
+  });
 });
 
 describe("reactionRemovedRecipientMessage", () => {
@@ -174,6 +197,12 @@ describe("reactionRemovedRecipientMessage", () => {
   test("plural phrasing for >1 tacos", () => {
     expect(reactionRemovedRecipientMessage("U_REACT", 3, "C_TAQ")).toBe(
       "🌮 <@U_REACT> removed their :taco: reaction in <#C_TAQ>; 3 tacos you received from them were taken back.",
+    );
+  });
+
+  test("echoes the alt emoji name when provided", () => {
+    expect(reactionRemovedRecipientMessage("U_REACT", 1, "C_TAQ", "wltaco")).toBe(
+      "🌮 <@U_REACT> removed their :wltaco: reaction in <#C_TAQ>; 1 taco you received from them was taken back.",
     );
   });
 });

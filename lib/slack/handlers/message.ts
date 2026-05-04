@@ -49,7 +49,7 @@ export function registerMessageHandler(app: App) {
     if (event.channel_type !== "channel") return;
 
     const text = "text" in event ? (event.text ?? "") : "";
-    const tacoCount = countTacos(text);
+    const tacoCount = countTacos(text, config.taco.acceptedEmojis);
     if (tacoCount === 0) return;
 
     const channelId = event.channel;
@@ -135,7 +135,7 @@ export function registerMessageHandler(app: App) {
         await client.reactions.add({
           channel: channelId,
           timestamp: event.ts,
-          name: "taco",
+          name: config.taco.confirmationEmojiName,
         });
       } catch (err) {
         console.warn("[reactions.add] failed", err);

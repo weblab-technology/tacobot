@@ -48,16 +48,18 @@ export function messageDeletedRecipientMessage(
 export function reactionRemovedReactorMessage(
   items: { recipientId: string; amount: number }[],
   channelId: string,
+  emojiName: string = "taco",
 ): string {
+  const emoji = `:${emojiName}:`;
   if (items.length === 1) {
     const { recipientId, amount } = items[0];
-    return `🌮 You removed your :taco: reaction in <#${channelId}>; ${amount} taco${amount === 1 ? "" : "s"} ${amount === 1 ? "was" : "were"} taken back from <@${recipientId}>.`;
+    return `🌮 You removed your ${emoji} reaction in <#${channelId}>; ${amount} taco${amount === 1 ? "" : "s"} ${amount === 1 ? "was" : "were"} taken back from <@${recipientId}>.`;
   }
   const lines = items.map(
     (i) => `<@${i.recipientId}> lost ${i.amount} taco${i.amount === 1 ? "" : "s"}.`,
   );
   return [
-    `🌮 You removed your :taco: reaction in <#${channelId}>; reversed:`,
+    `🌮 You removed your ${emoji} reaction in <#${channelId}>; reversed:`,
     ...lines,
   ].join("\n");
 }
@@ -66,6 +68,8 @@ export function reactionRemovedRecipientMessage(
   reactorId: string,
   amount: number,
   channelId: string,
+  emojiName: string = "taco",
 ): string {
-  return `🌮 <@${reactorId}> removed their :taco: reaction in <#${channelId}>; ${amount} taco${amount === 1 ? "" : "s"} you received from them ${amount === 1 ? "was" : "were"} taken back.`;
+  const emoji = `:${emojiName}:`;
+  return `🌮 <@${reactorId}> removed their ${emoji} reaction in <#${channelId}>; ${amount} taco${amount === 1 ? "" : "s"} you received from them ${amount === 1 ? "was" : "were"} taken back.`;
 }

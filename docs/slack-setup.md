@@ -98,3 +98,14 @@ The bot must be a member of every channel in `TACO_CHANNELS`. Slack only deliver
 ## 8. Admin allowlist
 
 Set `ADMIN_SLACK_IDS` to the comma-separated Slack user IDs that should have access to `/admin/*` pages. Adding/removing an admin is an env-var change + redeploy.
+
+## 9. (Optional) Custom currency emoji
+
+Tacobot always accepts `:taco:`. To additionally accept a workspace-custom emoji (for branded recognition like `:wltaco:`), set `TACO_ALT_EMOJI_NAME` to the emoji **name only** — no colons.
+
+Requirements:
+
+- The emoji must already exist in the workspace's custom emoji set (Slack → workspace settings → Customize → Emoji). The bot doesn't create it.
+- The bot's existing `reactions:write` scope (step 2) is enough to add the alt emoji as its confirmation reaction; no extra scope.
+
+When set, both `:taco:` and the alt emoji count for typed mentions and reactions, and the bot's own confirmation reaction uses the alt emoji.

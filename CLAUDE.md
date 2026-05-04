@@ -93,6 +93,7 @@ These are load-bearing. Don't paper over them — fix the underlying issue.
 - **DB CHECK constraints** (`lib/db/schema.ts`): `dailyRemaining >= 0`, `balance <= receivedTotal`, `priceTacos > 0`, `quantity > 0 OR NULL`, unique `lower(name)` among active items, three-way row shape (give: `fromUserId` set, no admin/item/reversal-ref, no self-give; redeem: `adminUserId` + `itemId` set, no `fromUserId`/reversal-ref; reversal: only `toUserId` and `reversedTransactionId` set, plus UNIQUE on `reversedTransactionId` to block double-reversal). `balance` and `receivedTotal` *may* be negative — they decrement together when a give is reversed after the recipient has already redeemed. Don't bypass with raw SQL.
 - **Auth.js admin gate** (`lib/auth.ts:14`) lives in the `signIn` callback, not a layout redirect. Non-admins never get a session. The admin layout still redirects unauthenticated visitors to `/api/auth/signin?callbackUrl=/admin`.
 - **User-name freshness** (`lib/slack/userInfo.ts`): 1-hour TTL cache + in-flight dedup. Score/leaderboard renders `<@USERID>` mentions so Slack handles current display name + avatar — we never have to re-render the cached name.
+- **Currency emoji set** (`lib/config.ts` → `taco.acceptedEmojis`): `:taco:` is always accepted. If `TACO_ALT_EMOJI_NAME` is set, that custom emoji is *additionally* accepted for both typed mentions and reactions, and the bot's confirmation reaction (`reactions.add`) uses it. Read this set via `config.taco.acceptedEmojis` / `config.taco.confirmationEmojiName` — don't hardcode `"taco"` in handlers.
 
 ## Conventions
 
@@ -117,6 +118,7 @@ These are load-bearing. Don't paper over them — fix the underlying issue.
 - **Re-react after unreact is silently ignored.** A reaction's give uses `slack_event_id = react-${channel}-${ts}-${reactor}-${idx}`, so removing then re-adding the same reaction tries to INSERT the identical key and `onConflictDoNothing` no-ops. The original give is permanently reversed; the new reaction has no effect. Pre-existing limitation; matches the same key collision that protects against Slack retries.
 - **Adding `reaction_removed` (or any new event)** means subscribing to it in the Slack app dashboard (`docs/slack-setup.md`) — not just registering it in `lib/slack/handlers.ts`.
 - **`message_deleted` reverses across the full message scope**, including `:taco:` reactions left by other people. The reactors are notified by DM. This matches Slack's own behavior (their reactions disappear with the message).
+- **Switching `TACO_ALT_EMOJI_NAME` between deploys does NOT touch historical gives.** Existing transactions remain valid; only future events are affected by the new accepted-emoji set. The reaction-removed DM echoes whichever emoji was actually removed (we read `event.reaction`), so reversing an old `:taco:` give still says `:taco:` even after switching the alt emoji.
 
 ## Where things live for common tasks
 

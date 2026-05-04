@@ -53,6 +53,27 @@ function intWithDefault(name: string, fallback: number): number {
   return n;
 }
 
+// Custom emoji name accepted as currency in addition to :taco:. Stored as the
+// emoji NAME without colons (matches Slack's `event.reaction` shape). Returns
+// undefined when the env var is unset, blank, or set to the literal "taco" —
+// in all those cases there is no *additional* emoji to accept.
+function readAltEmojiName(): string | undefined {
+  const raw = optional("TACO_ALT_EMOJI_NAME");
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.includes(":")) {
+    throw new Error(
+      `Invalid TACO_ALT_EMOJI_NAME: ${raw}. Provide the emoji name only, without colons (e.g. "wltaco", not ":wltaco:").`,
+    );
+  }
+  if (!/^[a-z0-9_+\-]+$/i.test(trimmed)) {
+    throw new Error(
+      `Invalid TACO_ALT_EMOJI_NAME: ${raw}. Allowed characters: letters, digits, underscore, hyphen, plus.`,
+    );
+  }
+  return trimmed === "taco" ? undefined : trimmed;
+}
+
 export const config = {
   slack: {
     get botToken(): string {
@@ -83,6 +104,16 @@ export const config = {
     },
     get dailyAllowance(): number {
       return intWithDefault("TACO_DAILY_ALLOWANCE", 5);
+    },
+    get altEmojiName(): string | undefined {
+      return readAltEmojiName();
+    },
+    get acceptedEmojis(): readonly string[] {
+      const alt = readAltEmojiName();
+      return alt ? ["taco", alt] : ["taco"];
+    },
+    get confirmationEmojiName(): string {
+      return readAltEmojiName() ?? "taco";
     },
   },
   admin: {

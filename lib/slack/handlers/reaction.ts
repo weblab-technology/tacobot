@@ -108,7 +108,7 @@ export async function processReaction(database: DbLike, input: ReactionInput): P
 
 export function registerReactionHandler(app: App) {
   app.event("reaction_added", async ({ event, client }) => {
-    if (event.reaction !== "taco") return;
+    if (!config.taco.acceptedEmojis.includes(event.reaction)) return;
     if (event.item.type !== "message") return;
     if (!config.taco.channels.includes(event.item.channel)) return;
 
@@ -174,8 +174,13 @@ export function registerReactionHandler(app: App) {
   });
 
   app.event("reaction_removed", async ({ event, client }) => {
-    if (event.reaction !== "taco") return;
+    if (!config.taco.acceptedEmojis.includes(event.reaction)) return;
     if (event.item.type !== "message") return;
+
+    // Echo the actual emoji that was removed in the reversal DMs (the reactor
+    // may have given via :taco: or via the alt emoji — the wording should
+    // match whichever they actually used).
+    const removedEmoji = event.reaction;
 
     // No allowlist check on reversal: we look up by (channel, ts, reactor),
     // so a non-matching channel naturally yields zero rows. Reversing a give
@@ -202,7 +207,7 @@ export function registerReactionHandler(app: App) {
     try {
       await client.chat.postMessage({
         channel: event.user,
-        text: reactionRemovedReactorMessage(reactorItems, event.item.channel),
+        text: reactionRemovedReactorMessage(reactorItems, event.item.channel, removedEmoji),
       });
     } catch (err) {
       console.warn("[chat.postMessage reversal reactor] failed", err);
@@ -212,7 +217,7 @@ export function registerReactionHandler(app: App) {
       try {
         await client.chat.postMessage({
           channel: rid,
-          text: reactionRemovedRecipientMessage(event.user, amount, event.item.channel),
+          text: reactionRemovedRecipientMessage(event.user, amount, event.item.channel, removedEmoji),
         });
       } catch (err) {
         console.warn("[chat.postMessage reversal recipient] failed", err);
