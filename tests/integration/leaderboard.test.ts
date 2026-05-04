@@ -119,3 +119,26 @@ test("received: a partially-reversed give nets to the remainder", async () => {
     expect(rows).toEqual([{ userId: "U_A", total: 3 }]);
   });
 });
+
+test("given: ranks active givers by net amount given, with reversals subtracted", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_X", name: "X", dailyAllowance: 50 });
+    await upsertUser(tx, { id: "U_Y", name: "Y", dailyAllowance: 50 });
+    await upsertUser(tx, { id: "U_R1", name: "R1", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_R2", name: "R2", dailyAllowance: 5 });
+
+    // X gives 4 total, has 1 reversed → net 3
+    const gx1 = await seedGive(tx, { fromId: "U_X", toId: "U_R1", amount: 1, eventId: "x1" });
+    await seedGive(tx, { fromId: "U_X", toId: "U_R2", amount: 3, eventId: "x2" });
+    await seedReversal(tx, { reversedId: gx1, toId: "U_R1", amount: 1, eventId: "rev-x1" });
+
+    // Y gives 5
+    await seedGive(tx, { fromId: "U_Y", toId: "U_R1", amount: 5, eventId: "y1" });
+
+    const rows = await getLeaderboard(tx, { metric: "given", since: null, channel: null });
+    expect(rows).toEqual([
+      { userId: "U_Y", total: 5 },
+      { userId: "U_X", total: 3 },
+    ]);
+  });
+});
