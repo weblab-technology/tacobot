@@ -1,4 +1,4 @@
-import { and, asc, eq, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { items, transactions, users } from "./schema";
 import type { DbLike } from "./types";
@@ -129,4 +129,76 @@ export async function countReversalsPerGiveGroup(
     out.set(`${r.fromUserId}|${r.slackChannelId}|${r.slackMessageTs}`, r.count);
   }
   return out;
+}
+
+export type LeaderboardMetric = "received" | "given" | "combined";
+
+export type LeaderboardRow = {
+  userId: string;
+  total: number;
+};
+
+export type LeaderboardOptions = {
+  metric: LeaderboardMetric;
+  since: Date | null;
+  channel: string | null;
+};
+
+/**
+ * Active users ranked by net tacos for the chosen metric/period/channel.
+ * Net = sum of give amounts minus sum of reversal amounts whose original
+ * give matches the same filters (net-by-give-date semantics).
+ */
+export async function getLeaderboard(
+  db: DbLike,
+  opts: LeaderboardOptions,
+): Promise<LeaderboardRow[]> {
+  if (opts.metric !== "combined") {
+    return runDirectional(db, opts.metric, opts);
+  }
+  const [recv, giv] = await Promise.all([
+    runDirectional(db, "received", opts),
+    runDirectional(db, "given", opts),
+  ]);
+  const totals = new Map<string, number>();
+  for (const r of recv) totals.set(r.userId, (totals.get(r.userId) ?? 0) + r.total);
+  for (const r of giv) totals.set(r.userId, (totals.get(r.userId) ?? 0) + r.total);
+  return [...totals.entries()]
+    .filter(([, total]) => total > 0)
+    .map(([userId, total]) => ({ userId, total }))
+    .sort((a, b) => b.total - a.total || a.userId.localeCompare(b.userId));
+}
+
+async function runDirectional(
+  db: DbLike,
+  direction: "received" | "given",
+  opts: { since: Date | null; channel: string | null },
+): Promise<LeaderboardRow[]> {
+  const g = alias(transactions, direction === "received" ? "g_recv" : "g_giv");
+  const r = alias(transactions, direction === "received" ? "r_recv" : "r_giv");
+  const u = alias(users, direction === "received" ? "u_recv" : "u_giv");
+  const userIdCol = direction === "received" ? g.toUserId : g.fromUserId;
+
+  const whereClauses = [
+    eq(g.type, "give"),
+    ...(opts.since ? [gte(g.createdAt, opts.since)] : []),
+    ...(opts.channel ? [eq(g.slackChannelId, opts.channel)] : []),
+  ];
+
+  const totalExpr = sql<number>`(coalesce(sum(${g.amount}), 0) - coalesce(sum(${r.amount}), 0))::int`;
+
+  const rows = await db
+    .select({
+      userId: sql<string>`${userIdCol}`.as("user_id"),
+      total: totalExpr.as("total"),
+    })
+    .from(g)
+    .leftJoin(r, and(eq(r.reversedTransactionId, g.id), eq(r.type, "reversal")))
+    .innerJoin(u, and(eq(u.id, userIdCol), eq(u.isActive, true)))
+    .where(and(...whereClauses))
+    .groupBy(userIdCol)
+    .having(sql`(coalesce(sum(${g.amount}), 0) - coalesce(sum(${r.amount}), 0)) > 0`)
+    .orderBy(desc(totalExpr), asc(sql`${userIdCol}`));
+
+  return rows.map((row) => ({ userId: row.userId, total: row.total }));
 }
