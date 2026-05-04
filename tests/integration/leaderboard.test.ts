@@ -167,3 +167,32 @@ test("combined: sums received + given per user; giver-only and receiver-only bot
     ]);
   });
 });
+
+test("period filter: only counts gives whose created_at is >= since", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_GIVER", name: "Giver", dailyAllowance: 50 });
+    await upsertUser(tx, { id: "U_A", name: "A", dailyAllowance: 5 });
+
+    await seedGive(tx, {
+      fromId: "U_GIVER",
+      toId: "U_A",
+      amount: 2,
+      eventId: "old",
+      createdAt: new Date("2026-05-03T23:00:00Z"),
+    });
+    await seedGive(tx, {
+      fromId: "U_GIVER",
+      toId: "U_A",
+      amount: 5,
+      eventId: "today",
+      createdAt: new Date("2026-05-04T01:00:00Z"),
+    });
+
+    const rows = await getLeaderboard(tx, {
+      metric: "received",
+      since: new Date("2026-05-04T00:00:00Z"),
+      channel: null,
+    });
+    expect(rows).toEqual([{ userId: "U_A", total: 5 }]);
+  });
+});
