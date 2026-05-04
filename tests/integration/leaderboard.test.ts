@@ -72,3 +72,50 @@ test("received: ranks active users by net received tacos, descending", async () 
     ]);
   });
 });
+
+test("received: reversal subtracts even when reversal happened outside the period", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_GIVER", name: "Giver", dailyAllowance: 50 });
+    await upsertUser(tx, { id: "U_A", name: "A", dailyAllowance: 5 });
+
+    // Original give: 2026-05-04 (inside "this week" if now is also that week)
+    const giveId = await seedGive(tx, {
+      fromId: "U_GIVER",
+      toId: "U_A",
+      amount: 3,
+      eventId: "e1",
+      createdAt: new Date("2026-05-04T10:00:00Z"),
+    });
+    // Reversal happened a week later (outside any small window starting at the give date)
+    await seedReversal(tx, {
+      reversedId: giveId,
+      toId: "U_A",
+      amount: 3,
+      eventId: "rev-e1",
+      createdAt: new Date("2026-05-15T10:00:00Z"),
+    });
+
+    // Window includes the give but not the reversal — reversal still subtracts.
+    const rows = await getLeaderboard(tx, {
+      metric: "received",
+      since: new Date("2026-05-04T00:00:00Z"),
+      channel: null,
+    });
+
+    expect(rows).toEqual([]); // net is 0, filtered by HAVING
+  });
+});
+
+test("received: a partially-reversed give nets to the remainder", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_GIVER", name: "Giver", dailyAllowance: 50 });
+    await upsertUser(tx, { id: "U_A", name: "A", dailyAllowance: 5 });
+
+    const giveA1 = await seedGive(tx, { fromId: "U_GIVER", toId: "U_A", amount: 2, eventId: "g1" });
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_A", amount: 3, eventId: "g2" });
+    await seedReversal(tx, { reversedId: giveA1, toId: "U_A", amount: 2, eventId: "rev-g1" });
+
+    const rows = await getLeaderboard(tx, { metric: "received", since: null, channel: null });
+    expect(rows).toEqual([{ userId: "U_A", total: 3 }]);
+  });
+});
