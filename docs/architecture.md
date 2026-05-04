@@ -55,10 +55,10 @@ How Tacobot is put together. Audience: engineers extending the codebase, on-call
 
 | Layer | Lives in | Responsibility |
 | --- | --- | --- |
-| HTTP boundary | `app/` | Next.js routes (landing, shop, admin items/users/activity), server actions, Slack webhook entry, cron entry, Auth.js handlers. Thin — delegates immediately. |
+| HTTP boundary | `app/` | Next.js routes (landing, shop, admin items/users/activity/leaderboard), server actions, Slack webhook entry, cron entry, Auth.js handlers. Thin — delegates immediately. |
 | Slack domain | `lib/slack/` | Bolt setup, custom receiver, event handlers, parser, give validation/decision/execution, format helpers, user-info cache. |
 | Persistence | `lib/db/` | Drizzle schema, query helpers, structural type for the DB client. |
-| Privileged ops | `lib/admin/` | Redemption (admin-initiated balance deduction). |
+| Privileged ops | `lib/admin/` | Redemption (admin-initiated balance deduction) and grant (admin-issued signed balance adjustment for onboarding / normalization). |
 | Cross-cutting | `lib/config.ts`, `lib/auth.ts` | Env-var access; auth + admin allowlist. |
 
 ## Data model
@@ -104,27 +104,28 @@ Plus a partial unique index: `lower(name)` is unique among `is_active = true`. T
 
 ### `transactions`
 
-The append-only audit log. Every `give`, every `redeem`, and every `reversal` adds rows here. Reversals compensate gives via a foreign key on `reversed_transaction_id` — we never UPDATE or DELETE existing rows.
+The append-only audit log. Every `give`, `redeem`, `reversal`, and `grant` adds rows here. Reversals compensate gives via a foreign key on `reversed_transaction_id`; grants are admin-issued signed adjustments. We never UPDATE or DELETE existing rows.
 
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | uuid PK | |
-| `type` | text NN | `'give'`, `'redeem'`, or `'reversal'`. |
-| `to_user_id` | text NN, FK → users | Always set. For `reversal`, this is the original recipient (whose counters are decremented). |
-| `from_user_id` | text, FK → users | Set for `give`, NULL for `redeem` and `reversal`. |
-| `admin_user_id` | text, FK → users | Set for `redeem`, NULL for `give` and `reversal`. |
-| `item_id` | uuid, FK → items | Set for `redeem`, NULL for `give` and `reversal`. |
-| `amount` | int NN | CHECK > 0. For `reversal`, mirrors the original give's amount. |
-| `reason` | text | Free text — message body for gives, admin note for redeems, `'message_deleted'` / `'reaction_removed'` for reversals. |
-| `slack_event_id` | text UNIQUE | Idempotency key (see below). |
-| `slack_channel_id` | text | Where the give happened (NULL for redeems). Mirrored on reversals. |
-| `slack_message_ts` | text | The message Slack timestamp (NULL for redeems). Mirrored on reversals. |
+| `type` | text NN | `'give'`, `'redeem'`, `'reversal'`, or `'grant'`. |
+| `to_user_id` | text NN, FK → users | Always set. For `reversal`, this is the original recipient (whose counters are decremented). For `grant`, the recipient of the adjustment. |
+| `from_user_id` | text, FK → users | Set for `give`. NULL for `redeem`, `reversal`, and `grant`. |
+| `admin_user_id` | text, FK → users | Set for `redeem` and `grant`. NULL for `give` and `reversal`. |
+| `item_id` | uuid, FK → items | Set for `redeem`. NULL for `give`, `reversal`, and `grant`. |
+| `amount` | int NN | Type-conditional CHECK (see below). For `give`/`redeem`/`reversal`: positive. For `grant`: any non-zero signed integer (negative claws back). |
+| `reason` | text | Free text — message body for gives, admin note for redeems / grants, `'message_deleted'` / `'reaction_removed'` for reversals. |
+| `slack_event_id` | text UNIQUE | Idempotency key (see below). NULL for grants — they're idempotent at the UI layer (confirm dialog) rather than at the storage layer. |
+| `slack_channel_id` | text | Where the give happened (NULL for redeems and grants). Mirrored on reversals. |
+| `slack_message_ts` | text | The message Slack timestamp (NULL for redeems and grants). Mirrored on reversals. |
 | `reversed_transaction_id` | uuid UNIQUE | Set for `reversal` only — points at the give being compensated. UNIQUE so any single give can be reversed at most once. |
 | `created_at` | timestamptz | |
 
-Three composite checks make the row shape watertight:
+Two composite CHECKs keep the row shape and amount watertight:
 
 ```sql
+-- Row shape: each type fixes which optional columns may/must be set.
 CHECK (
   (type = 'give'     AND from_user_id IS NOT NULL
                      AND admin_user_id IS NULL
@@ -141,8 +142,18 @@ CHECK (
                      AND admin_user_id IS NULL
                      AND item_id IS NULL
                      AND reversed_transaction_id IS NOT NULL)
+  OR
+  (type = 'grant'    AND from_user_id IS NULL
+                     AND admin_user_id IS NOT NULL
+                     AND item_id IS NULL
+                     AND reversed_transaction_id IS NULL)
 )
-CHECK (amount > 0)
+-- Amount: positive everywhere except grants, where signed non-zero is allowed.
+CHECK (
+  (type IN ('give','redeem','reversal') AND amount > 0)
+  OR
+  (type = 'grant' AND amount <> 0)
+)
 ```
 
 Indexes: `(to_user_id, created_at)`, `(from_user_id, created_at)`, `(type, created_at)`, `(admin_user_id, created_at)`, `(slack_channel_id, slack_message_ts)` — the last one supports the reversal lookup on `message_deleted` events.
@@ -211,7 +222,23 @@ Initiated by an admin in `/admin/users`.
    - `INSERT INTO transactions (type='redeem', to_user_id=employeeId, admin_user_id=adminId, item_id=itemId, amount, reason)`. The CHECK constraints enforce row shape.
 5. `revalidatePath("/admin/users")` so the table re-fetches.
 
-There is no "undo redemption" UI by design — the audit log is append-only. To compensate, give the user a `give` from a workspace admin's Slack account or have an engineer issue a correcting `redeem` row with a clear `reason`.
+There is no "undo redemption" UI by design — the audit log is append-only. To compensate, give the user a `give` from a workspace admin's Slack account or issue a correcting `grant` row from `/admin/users` with a clear `reason`.
+
+## Grant flow trace
+
+Initiated by an admin via the **Adjust** form on `/admin/users`. Used for onboarding starter packs (positive amount) or beta-balance clawbacks (negative amount). Signed integer; non-zero.
+
+1. The admin types ±N, optionally a reason, clicks **Adjust**. The client form (`AdjustForm.tsx`) shows a `window.confirm` summarising the change ("Apply +5 tacos to Alice? Reason: onboarding") with an explicit "This will DECREASE the user's balance" warning when N is negative. Cancelling the confirm aborts the submit.
+2. The form posts to the `adjustTacos` server action (`app/admin/users/actions.ts`).
+3. `requireAdminId()` calls `auth()` and pulls `slackUserId`. No session → throw.
+4. `grant(db, { recipientId, amount, adminId, reason })` (`lib/admin/grant.ts`):
+   - Transaction.
+   - `UPDATE users SET balance = balance + amount, received_total = received_total + amount, updated_at = now() WHERE id = recipientId`. Both columns move by the *same signed delta* so the `balance <= received_total` CHECK is preserved. Both may go negative; the schema tolerates that.
+   - `INSERT INTO transactions (type='grant', to_user_id=recipientId, admin_user_id=adminId, amount, reason)`. The amount CHECK accepts non-zero values for grants.
+5. Best-effort DM to the recipient via `grantNotificationMessage`. The DB write has already committed; if Slack is down or DMs are disabled, we log and move on rather than throwing.
+6. `revalidatePath("/admin/users")`.
+
+Grants bypass the daily-give allowance — `daily_remaining` is *not* touched. They have no `slack_event_id`, no channel context, and no idempotency key at the storage layer — the confirm dialog is the only guard against double-clicks. Two consecutive identical clicks would create two `transactions` rows and apply the delta twice.
 
 ## Reversal flow trace
 

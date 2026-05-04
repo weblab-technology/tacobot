@@ -23,12 +23,14 @@ Run this after every deploy. Use the beta channel listed in `TACO_CHANNELS` and 
 - [ ] Sign in to `/admin/items` with an admin Slack account — add a test item with a name, price, and either an uploaded image or pasted URL. It appears on `/shop` (give ISR up to 60s, or hard-refresh).
 - [ ] Sign in to `/admin/users` — pick a test user, choose the new item, deduct tacos. Their `balance` drops, a `transactions` row is recorded with `type='redeem'`.
 - [ ] Open `/admin/activity` — your test gives appear at the top with the right giver/recipient/channel, the all-time total includes them, and the channel filter dropdown lists the test channel. Test gives you reversed earlier in this checklist show the ↺ **reversed** or ↺ **partially reversed** pill.
+- [ ] Open `/admin/leaderboard` — switch metric (received/given/combined), period (today/week/month/all-time), and channel filters. The page auto-refreshes on each change; your test gives are reflected; reversed gives are excluded; ties share a rank.
+- [ ] On `/admin/users`, use the **Adjust** form on a test user with `+1` and a reason. Confirm dialog appears; on accept, balance and `received_total` both go up by 1, a `type='grant'` row is recorded, and the test user gets a DM from the bot. Then apply `-1` with a reason; the negative-warning line appears in the confirm; balance drops; another grant row is recorded. Finally try `0` — rejected ("amount must be a non-zero integer").
 - [ ] Sign-in attempt as a non-admin Slack account — bounces back to sign-in (no session is created).
 - [ ] Trigger `/api/cron/reset-allowance` manually with `Authorization: Bearer ${CRON_SECRET}` — response `{ updated: <count> }`. All active users' `daily_remaining` is back to `TACO_DAILY_ALLOWANCE`.
 
 ## Audit queries
 
-The `transactions` table is the append-only audit log. Three row types: `give`, `redeem`, `reversal`. A `reversal` references the original `give` via `reversed_transaction_id` and never modifies it. Most analytics want "net" numbers — gives that weren't reversed — so queries below subtract reversed gives explicitly.
+The `transactions` table is the append-only audit log. Four row types: `give`, `redeem`, `reversal`, `grant`. A `reversal` references the original `give` via `reversed_transaction_id` and never modifies it; a `grant` is an admin-issued signed adjustment (positive or negative). Most analytics want "net" numbers — gives that weren't reversed — so queries below subtract reversed gives explicitly. Grants don't appear in give/receive analytics by default (they aren't peer-to-peer recognition); they show up in reconciliation and in dedicated grant queries.
 
 Run via `pnpm db:studio` or `psql $POSTGRES_URL`.
 
@@ -70,6 +72,19 @@ WHERE t.type = 'reversal'
 GROUP BY u.name
 ORDER BY reversals DESC
 LIMIT 20;
+
+-- Admin grants (signed adjustments, positive and negative)
+SELECT t.created_at,
+       a.name AS admin,
+       u.name AS recipient,
+       t.amount,
+       t.reason
+FROM transactions t
+JOIN users u ON u.id = t.to_user_id
+JOIN users a ON a.id = t.admin_user_id
+WHERE t.type = 'grant'
+ORDER BY t.created_at DESC
+LIMIT 100;
 ```
 
 ### Monthly digest
@@ -153,35 +168,39 @@ If `TACO_DAILY_ALLOWANCE = 5` you should never see >5 from one user in one UTC d
 ### Balance reconciliation
 
 ```sql
--- For each user: SUM(received via gives) − SUM(reversed) − SUM(redeemed) should equal users.balance.
--- (Reversal rows have to_user_id = original recipient; the SUM is by to_user_id, not by reversed_transaction_id.)
+-- For each user: SUM(gives received) − SUM(reversals against those gives) − SUM(redeems) + SUM(grants) should equal users.balance.
+-- Grants are signed (`amount` may be negative), so we add them rather than subtract.
 SELECT u.id, u.name, u.balance,
        COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'give'),     0)
        - COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'reversal'), 0)
-       - COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'redeem'),   0) AS computed_balance
+       - COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'redeem'),   0)
+       + COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'grant'),    0) AS computed_balance
 FROM users u
 LEFT JOIN transactions t ON t.to_user_id = u.id
 GROUP BY u.id, u.name, u.balance
 HAVING u.balance <>
        COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'give'),     0)
        - COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'reversal'), 0)
-       - COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'redeem'),   0);
+       - COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'redeem'),   0)
+       + COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'grant'),    0);
 
--- Equivalent check for received_total: gives received − reversals received.
+-- Equivalent check for received_total: gives received − reversals received + grants.
 SELECT u.id, u.name, u.received_total,
        COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'give'),     0)
-       - COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'reversal'), 0) AS computed_received
+       - COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'reversal'), 0)
+       + COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'grant'),    0) AS computed_received
 FROM users u
 LEFT JOIN transactions t ON t.to_user_id = u.id
 GROUP BY u.id, u.name, u.received_total
 HAVING u.received_total <>
        COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'give'),     0)
-       - COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'reversal'), 0);
+       - COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'reversal'), 0)
+       + COALESCE(SUM(t.amount) FILTER (WHERE t.type = 'grant'),    0);
 ```
 
-A row in either result means the audit log doesn't match the cached counter. The DB CHECK constraints (`balance <= received_total`, `daily_remaining >= 0`, `amount > 0`, the three-way row-shape rule, and `reversed_transaction_id` UNIQUE) make this near-impossible, so a non-empty result is a strong signal of either a bug in the give/redeem/reversal path or a manual SQL edit. Investigate before "fixing" the counter.
+A row in either result means the audit log doesn't match the cached counter. The DB CHECK constraints (`balance <= received_total`, `daily_remaining >= 0`, the type-conditional amount rule, the four-way row-shape rule, and `reversed_transaction_id` UNIQUE) make this near-impossible, so a non-empty result is a strong signal of either a bug in the give/redeem/reversal/grant path or a manual SQL edit. Investigate before "fixing" the counter.
 
-Note: `balance` and `received_total` are *allowed* to be negative when a give is reversed after the recipient already redeemed against it. That's not corruption — it's the correct accounting outcome, and the reconciliation query above will show `computed = users.*` in that case (both sides match).
+Note: `balance` and `received_total` are *allowed* to be negative — when a give is reversed after the recipient already redeemed against it, or when an admin issues a negative `grant`. That's not corruption; it's the correct accounting outcome and the reconciliation query will show `computed = users.*` in those cases.
 
 ### Permalink for a give
 
@@ -261,6 +280,17 @@ curl -X POST "https://<deploy-host>/api/cron/reset-allowance" \
 
 Returns `{ "updated": <count> }`. Idempotent — running it twice in a day just resets twice (which only matters if someone gave tacos in between, in which case their day starts fresh).
 
+### Onboarding a new user with a starter balance
+
+To give a new hire (or any active user) a starter balance — typical pattern when seeding the bot for the first time, or when someone joins mid-quarter and you want them to participate immediately:
+
+1. Sign in to `/admin/users` as an admin.
+2. Find the user. (If they don't appear yet, run `pnpm sync-users` first or wait for `team_join` to fire.)
+3. Use the **Adjust** form on their row: type a positive integer (e.g. `5`), add a reason like "onboarding starter pack", click **Adjust**, confirm the dialog.
+4. Both `balance` and `received_total` go up by the amount; a `type='grant'` row is recorded with your admin ID; the user gets a DM from the bot.
+
+Don't use this for ongoing daily participation — the daily-allowance + `:taco:` flow is what makes it visible recognition. Grants are administrative; they don't appear in the activity feed and they don't show up in give/receive analytics by default (only in the "Admin grants" audit query and in reconciliation).
+
 ### Manual balance correction
 
 There is no "undo" UI by design; the audit log is append-only. Compensate with an *append* — never edit existing rows.
@@ -268,8 +298,9 @@ There is no "undo" UI by design; the audit log is append-only. Compensate with a
 In order of preference:
 
 - **Reverse the original give in Slack** (no admin intervention needed). If the issue is a recent give that shouldn't have happened — wrong recipient, posted as a joke, etc. — the giver can delete the message or remove the 🌮 reaction. The handler in `lib/slack/handlers/{message,reaction}.ts` writes a `type='reversal'` row, decrements the recipient's `balance`/`received_total`, restores the giver's `daily_remaining` (capped at the daily allowance), and DMs both parties. Idempotent and safe even under Slack retries.
-- **In-band give**, for forward correction: have a workspace admin give the user the right number of `:taco:` reactions in `#taqueria` to even things out. Visible to the team.
-- **Engineer-applied correction**, for HR-tracked adjustments: insert a single correcting row with a clear `reason` (e.g. "manual correction — over-redeemed at all-hands 2026-Q2") via `pnpm db:studio` or a one-shot script. Update the cached `users.balance` / `users.received_total` in the same transaction so the `balance <= received_total` CHECK stays satisfied. Document the original transaction ID in the `reason` field so the audit trail is traversable later.
+- **Admin grant from `/admin/users`** (`adjustTacos` server action → `lib/admin/grant.ts`). Use a positive amount to credit, negative to claw back. Both `balance` and `received_total` move by the same delta so the `balance <= received_total` invariant holds. Always include a clear `reason` (it's logged on the `transactions` row and DM'd to the user). This is the right tool for "Q2 beta over-credited everyone, pull back N tacos per active user".
+- **In-band give**, for forward correction with team visibility: have a workspace admin give the user the right number of `:taco:` reactions in `#taqueria`. Public, attributable, but consumes the admin's daily allowance.
+- **Engineer-applied correction at the SQL layer**, only when the above three can't express what you need (e.g. a correcting `redeem` row tying back to a specific item): insert a single row via `pnpm db:studio` or a one-shot script, with a clear `reason`, and update the cached `users.balance` / `users.received_total` in the same transaction so CHECKs stay satisfied. Document the original transaction ID in the `reason` field so the audit trail is traversable later.
 
 Never `UPDATE` or `DELETE` an existing `transactions` row — the schema's CHECK constraints and `reversed_transaction_id` UNIQUE assume rows are immutable, and downstream queries (reconciliation, monthly digests) read the entire history.
 

@@ -67,8 +67,8 @@ Vitest config (`vitest.config.ts`):
 
 | Layer | Where | What's tested |
 | --- | --- | --- |
-| Unit | `tests/unit/` | Pure functions: `parser`, `format`, `give.validate`, `give.decide`, `receiver.verify`, `userInfo.resolveUserName`, date helpers, `config.altEmojiName` validation, reaction-handler emoji-gate. Fast, no DB. |
-| Integration | `tests/integration/` | Real handlers + real DB (PGlite): constraints, `users` upsert/ensure, `executeGive`, redemption, reaction give (including alt-emoji gives), message-delete reversal, reaction-removed reversal, reversal counters, cron reset, leaderboard command. |
+| Unit | `tests/unit/` | Pure functions: `parser`, `format`, `give.validate`, `give.decide`, `receiver.verify`, `userInfo.resolveUserName`, date helpers (incl. `periodStart` for ISO Monday weeks), `config.altEmojiName` and `config.reactOnGive` validation, reaction-handler emoji-gate. Fast, no DB. |
+| Integration | `tests/integration/` | Real handlers + real DB (PGlite): constraints (incl. type-conditional amount and four-way row shape), `users` upsert/ensure, `executeGive`, redemption, reaction give (including alt-emoji gives), message-delete reversal, reaction-removed reversal, reversal counters, cron reset, `score` DM command, `grant` (positive and negative adjustments, audit row, invariants), `getLeaderboard` (received/given/combined, period filter, channel filter, inactive-user exclusion, tied ranks). |
 
 Pure logic stays unit-testable so it can be exercised without spinning up PGlite. If you find yourself needing a DB in a unit test, the function probably belongs in `lib/db/queries.ts` (and the test in `tests/integration/`).
 

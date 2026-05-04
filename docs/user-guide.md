@@ -115,3 +115,7 @@ The reversal is recorded as its own row in the audit log (a `type='reversal'` en
 **Why is the leaderboard showing someone whose name looks like `U02ABC123`?**
 
 Tacobot caches display names but occasionally hasn't seen yours yet (rare, usually only on first interaction). It'll resolve to your real name within a few minutes.
+
+**The bot DM'd me about a taco adjustment I didn't earn — what's that?**
+
+That's an admin (HR) using the **Adjust** tool — a signed balance adjustment, separate from peer-to-peer gives. The DM tells you the amount and the reason. Common cases: an onboarding starter pack to get you into the shop quickly, or a workspace-wide normalization (e.g. rolling back inflated balances from a beta period). It's not a give; it doesn't appear in the activity feed; nobody used their daily allowance to send it.

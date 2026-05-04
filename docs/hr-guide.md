@@ -147,6 +147,43 @@ Use the **Filter** dropdown to scope the feed to one channel — handy when empl
 
 This page is read-only. There are no buttons to deduct, refund, or edit anything from here — it's a lens, not a tool. To act on what you see, use `/admin/users` (redemption) or ask the employee to delete/unreact (reversal).
 
+## Browsing the leaderboard (`/admin/leaderboard`)
+
+A ranked table of who's sitting on top of the taco economy, with three filter dimensions:
+
+- **Metric**: *Tacos received* (default), *Tacos given*, or *Tacos combined* (received + given).
+- **Period**: *All-time* (default), *Today*, *This week*, or *This month*. Periods are computed in UTC; weeks are ISO weeks (Monday start) so they line up with the daily-reset boundary.
+- **Channel**: *All channels* (default) or any single channel that's seen a give.
+
+Filters auto-submit on change — pick a value and the page re-renders.
+
+The table shows rank (sport-style: ties share a rank, the next rank skips by the size of the tie group), the user's name (clickable Slack handle), and total tacos for the chosen metric/period/channel. Inactive users are excluded; reversed gives are *not* counted.
+
+Read-only. Use this for "who do we celebrate this month?" — pair it with a public shout-out in `#general`.
+
+## Granting or clawing back tacos (`/admin/users` → Adjust)
+
+Each row in `/admin/users` has an **Adjust** form alongside the Redeem form. Use it when you need to apply a *signed* change to someone's balance — positive to credit, negative to debit. The two intended use cases:
+
+- **Onboarding starter pack**: a new hire gets +5 (or whatever you decide) so they can immediately participate in the shop.
+- **Normalization / clawback**: roll back a balance that drifted during beta or got over-credited by a since-fixed bug.
+
+How to use it:
+
+1. Find the user in the table.
+2. Type a signed integer in the **±N** field (e.g. `5` or `-3`). Zero is rejected.
+3. Optional **Reason** — strongly recommended; this becomes part of the audit log.
+4. Click **Adjust**. A browser confirm dialog appears summarising the change ("Apply +5 tacos to Alice? Reason: onboarding"). Negative amounts get an extra warning line. Confirm to apply.
+5. Both the user's `balance` and `received_total` move by the same delta (so the leaderboard reflects the change). The user gets a DM from the bot announcing the adjustment and the reason.
+
+What this is *not*:
+
+- Not a redemption — there's no item, no shop credit moving the other way. Use the Redeem form for redemptions.
+- Not a "give" — it doesn't consume your daily allowance, isn't tied to a Slack message, and doesn't appear in the activity feed.
+- Not undoable in the UI. The audit log is append-only. If you applied the wrong sign, immediately apply a compensating adjustment (e.g. you applied `+5` by mistake, follow with `-5` and a reason like "compensating mistaken +5 above").
+
+Use sparingly. Every grant is logged with your Slack ID, the recipient, the amount, and the reason — and unlike gives or redeems, there's no other system check on the magnitude. The confirm dialog is the only guard against typos, so read it before clicking.
+
 ## Common HR tasks
 
 ### Item is out of stock
