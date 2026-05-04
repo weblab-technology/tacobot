@@ -130,15 +130,17 @@ export function registerMessageHandler(app: App) {
     }
 
     if (result.kind === "ok") {
-      // Visual ack; failure is non-fatal.
-      try {
-        await client.reactions.add({
-          channel: channelId,
-          timestamp: event.ts,
-          name: config.taco.confirmationEmojiName,
-        });
-      } catch (err) {
-        console.warn("[reactions.add] failed", err);
+      // Visual ack; failure is non-fatal. Off by default — see TACO_REACT_ON_GIVE.
+      if (config.taco.reactOnGive) {
+        try {
+          await client.reactions.add({
+            channel: channelId,
+            timestamp: event.ts,
+            name: config.taco.confirmationEmojiName,
+          });
+        } catch (err) {
+          console.warn("[reactions.add] failed", err);
+        }
       }
 
       const remainingAfter = giver.dailyRemaining - plan.giverDecrement;

@@ -53,6 +53,17 @@ function intWithDefault(name: string, fallback: number): number {
   return n;
 }
 
+function boolWithDefault(name: string, fallback: boolean): boolean {
+  const v = optional(name);
+  if (!v) return fallback;
+  const normalized = v.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1") return true;
+  if (normalized === "false" || normalized === "0") return false;
+  throw new Error(
+    `Invalid boolean for env var ${name}: ${v}. Must be one of "true", "false", "1", "0".`,
+  );
+}
+
 // Custom emoji name accepted as currency in addition to :taco:. Stored as the
 // emoji NAME without colons (matches Slack's `event.reaction` shape). Returns
 // undefined when the env var is unset, blank, or set to the literal "taco" —
@@ -114,6 +125,9 @@ export const config = {
     },
     get confirmationEmojiName(): string {
       return readAltEmojiName() ?? "taco";
+    },
+    get reactOnGive(): boolean {
+      return boolWithDefault("TACO_REACT_ON_GIVE", false);
     },
   },
   admin: {

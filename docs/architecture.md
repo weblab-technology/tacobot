@@ -179,7 +179,7 @@ What happens when someone posts `<@alice> :taco: :taco:` in `#taqueria`:
      - For each planned transaction:
        - `UPDATE users SET received_total = received_total + amount, balance = balance + amount` for the recipient.
        - `INSERT INTO transactions (…) ON CONFLICT (slack_event_id) DO NOTHING RETURNING id`. If the insert returns 0 rows, throw `DuplicateGiveError` (caught outside the transaction, returns `duplicate`).
-   - On `ok`: best-effort `reactions.add({ name: "taco" })`, then DM the giver a summary, then DM each recipient. Failures here are logged and swallowed — the database is the source of truth.
+   - On `ok`: if `config.taco.reactOnGive` is `true` (env `TACO_REACT_ON_GIVE`, default `false`), best-effort `reactions.add({ name: config.taco.confirmationEmojiName })` on the giver's message; then DM the giver a summary, then DM each recipient. The reaction is off by default because users mistake the bot's reaction for an extra give. Failures here are logged and swallowed — the database is the source of truth.
 
 ## Reaction flow trace
 

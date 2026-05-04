@@ -106,6 +106,6 @@ Tacobot always accepts `:taco:`. To additionally accept a workspace-custom emoji
 Requirements:
 
 - The emoji must already exist in the workspace's custom emoji set (Slack → workspace settings → Customize → Emoji). The bot doesn't create it.
-- The bot's existing `reactions:write` scope (step 2) is enough to add the alt emoji as its confirmation reaction; no extra scope.
+- The bot's existing `reactions:write` scope (step 2) is enough to add the alt emoji as its confirmation reaction (when enabled — see `TACO_REACT_ON_GIVE` below); no extra scope.
 
-When set, both `:taco:` and the alt emoji count for typed mentions and reactions, and the bot's own confirmation reaction uses the alt emoji.
+When set, both `:taco:` and the alt emoji count for typed mentions and reactions. If `TACO_REACT_ON_GIVE=true` (default `false`), the bot's own confirmation reaction uses the alt emoji.
