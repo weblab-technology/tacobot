@@ -139,9 +139,18 @@ The order of "fulfill" vs. "deduct" is your call. Some HR teams deduct first (to
 - **No quantity set, indefinite restock**: deactivate the item (`Deactivate` button below its form). It vanishes from `/shop`. Reactivate when restocked.
 - **Quantity set**: edit the item, set quantity to 0, save. The shop page still shows the item but with "0 available" so employees know what's coming back. (Yes, the system technically lets you redeem against 0 quantity — quantity is informational. Use deactivation if you need a hard stop.)
 
+### A give was a mistake (employee asks)
+
+Employees can fix this themselves — you usually don't need to do anything. They have two options:
+
+- Remove the 🌮 reaction, or
+- Delete the Slack message that gave the taco(s).
+
+Either action reverses the give automatically: the recipient's balance drops, the giver's daily allowance is restored (capped), and both parties get a DM. The audit log records a `type='reversal'` row pointing at the original give. If an employee asks you to "undo a give", first check whether they can do it themselves with one of the above.
+
 ### A redemption was a mistake
 
-There's no "undo" button by design — the audit log is append-only.
+Redemptions are *not* automatically reversible — there's no "undo" button by design and the audit log is append-only.
 
 If the mistake was small (wrong amount), do a compensating action:
 

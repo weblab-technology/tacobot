@@ -22,7 +22,7 @@ Two ways. Both work; pick whichever fits the moment.
 
 Hover over a teammate's message → click **Add reaction** → pick `:taco:`. That's one taco for them, debited from your daily allowance.
 
-If you change your mind, remove the reaction. (Note: removing the reaction does **not** refund the taco — gives are append-only by design.)
+If you change your mind, remove the reaction. The give is reversed: the recipient's balance drops back, your daily allowance is restored (capped at the daily limit), and both of you get a DM. **Caveat:** if you remove and then re-add the same reaction on the same message, the second reaction is silently ignored (it has the same internal ID as the first, which has now been reversed). To give them a taco again, give from a different message.
 
 ### Type a give
 
@@ -97,7 +97,12 @@ Yes — threaded messages count the same as top-level messages, as long as the p
 
 **Can I take back a taco I gave by mistake?**
 
-No. The audit log is append-only — gives are permanent records, even if the reaction is removed. If you really need a correction, ask the recipient to react with 🌮 right back, and call it even.
+Yes, two ways:
+
+- **By reaction**: remove the 🌮 reaction. The give is reversed — recipient's balance drops, your daily allowance is restored (up to the daily limit). You both get a DM.
+- **By message**: delete the Slack message that gave the taco(s). All gives associated with that message are reversed — including any 🌮 reactions other people left on it. Everyone affected gets a DM.
+
+The reversal is recorded as its own row in the audit log (a `type='reversal'` entry referencing the original give); the original give isn't deleted. If you need to give the same taco *again* after reversing, post a new message — re-doing the same reaction on the same message is silently ignored.
 
 **When does the daily reset happen?**
 

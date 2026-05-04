@@ -250,7 +250,7 @@ The flow is convergent: the same event delivered N times produces the same final
 Two scenarios:
 
 - **Concurrent gives from the same user** (e.g., they post two messages a millisecond apart): each transaction's `WHERE daily_remaining >= N` is the gate. Postgres serializes the row-level update — only one transaction can hold the row's xmax at a time, and the second transaction sees the post-first-decrement value. The over-allowance one returns 0 rows from the UPDATE and rolls back.
-- **Concurrent admin redemptions for the same employee**: same pattern on `balance`. The DB CHECK (`balance >= 0`) is a belt-and-braces guard.
+- **Concurrent admin redemptions for the same employee**: same pattern on `balance`. The atomic `WHERE balance >= amount` is the gate; a `balance >= 0` CHECK is *not* present (reversals can push it negative), so the WHERE clause carries the full weight.
 
 We don't need advisory locks or read-modify-write retry loops because the UPDATE-with-WHERE atomically captures the read. This is the single most important reason every state mutation goes through `executeGive` / `redeem` rather than ad-hoc Drizzle calls in handlers.
 
