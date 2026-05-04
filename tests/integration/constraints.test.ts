@@ -138,6 +138,98 @@ test("reversal row without reversed_transaction_id is rejected", async () => {
   });
 });
 
+test("valid grant row (admin set, no from/item/reversal-ref) is accepted", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_HR", name: "HR", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_R", name: "R", dailyAllowance: 5 });
+    await tx.execute(sql`
+      INSERT INTO transactions (type, to_user_id, admin_user_id, amount)
+      VALUES ('grant', 'U_R', 'U_HR', 7)
+    `);
+    const grants = await tx
+      .select()
+      .from(transactions)
+      .where(eq(transactions.type, "grant"));
+    expect(grants).toHaveLength(1);
+    expect(grants[0].amount).toBe(7);
+    expect(grants[0].adminUserId).toBe("U_HR");
+    expect(grants[0].fromUserId).toBeNull();
+    expect(grants[0].itemId).toBeNull();
+  });
+});
+
+test("grant row with from_user_id is rejected by shape rule", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_HR", name: "HR", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_R", name: "R", dailyAllowance: 5 });
+    await expect(
+      tx.execute(sql`
+        INSERT INTO transactions (type, to_user_id, from_user_id, admin_user_id, amount)
+        VALUES ('grant', 'U_R', 'U_HR', 'U_HR', 1)
+      `),
+    ).rejects.toThrow(/transactions_shape_and_rule|check constraint|check_violation/i);
+  });
+});
+
+test("grant row with item_id is rejected by shape rule", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_HR", name: "HR", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_R", name: "R", dailyAllowance: 5 });
+    const [it] = await tx
+      .insert(items)
+      .values({ name: "Mug", priceTacos: 5 })
+      .returning();
+    await expect(
+      tx.execute(sql`
+        INSERT INTO transactions (type, to_user_id, admin_user_id, item_id, amount)
+        VALUES ('grant', 'U_R', 'U_HR', ${it.id}, 1)
+      `),
+    ).rejects.toThrow(/transactions_shape_and_rule|check constraint|check_violation/i);
+  });
+});
+
+test("grant row with negative amount is accepted (signed grants)", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_HR", name: "HR", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_R", name: "R", dailyAllowance: 5 });
+    await tx.execute(sql`
+      INSERT INTO transactions (type, to_user_id, admin_user_id, amount)
+      VALUES ('grant', 'U_R', 'U_HR', -5)
+    `);
+    const [row] = await tx
+      .select()
+      .from(transactions)
+      .where(eq(transactions.type, "grant"));
+    expect(row.amount).toBe(-5);
+  });
+});
+
+test("grant row with amount=0 is rejected", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_HR", name: "HR", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_R", name: "R", dailyAllowance: 5 });
+    await expect(
+      tx.execute(sql`
+        INSERT INTO transactions (type, to_user_id, admin_user_id, amount)
+        VALUES ('grant', 'U_R', 'U_HR', 0)
+      `),
+    ).rejects.toThrow(/transactions_amount|check constraint|check_violation/i);
+  });
+});
+
+test("give row with negative amount is still rejected (only grant allows signed)", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_G", name: "G", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_R", name: "R", dailyAllowance: 5 });
+    await expect(
+      tx.execute(sql`
+        INSERT INTO transactions (type, to_user_id, from_user_id, amount, slack_event_id)
+        VALUES ('give', 'U_R', 'U_G', -1, 'NegGive')
+      `),
+    ).rejects.toThrow(/transactions_amount|check constraint|check_violation/i);
+  });
+});
+
 test("a give cannot be reversed twice (UNIQUE on reversed_transaction_id)", async () => {
   await inRollbackTx(async (tx) => {
     await upsertUser(tx, { id: "U_G", name: "G", dailyAllowance: 5 });

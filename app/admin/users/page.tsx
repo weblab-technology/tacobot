@@ -3,6 +3,7 @@ import { asc, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { items, users } from "@/lib/db/schema";
 import { deductTacos } from "./actions";
+import { AdjustForm } from "./AdjustForm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +30,7 @@ export default async function UsersPage() {
             <th className="px-4 py-3">Balance</th>
             <th className="px-4 py-3">Today left</th>
             <th className="px-4 py-3">Redeem</th>
+            <th className="px-4 py-3">Adjust</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100 text-sm">
@@ -67,6 +69,9 @@ export default async function UsersPage() {
                     Deduct
                   </button>
                 </form>
+              </td>
+              <td className="px-4 py-3">
+                <AdjustForm userId={u.id} userName={u.name} />
               </td>
             </tr>
           ))}

@@ -64,6 +64,23 @@ export function reactionRemovedReactorMessage(
   ].join("\n");
 }
 
+// Recipient-facing DM for an admin balance adjustment. Branches on sign:
+// positive grants get warm onboarding wording with a shop link; negative
+// grants get neutral "adjusted" wording. Optional `reason` is appended on a
+// new line.
+export function grantNotificationMessage(
+  amount: number,
+  reason: string | null,
+  shopUrl: string,
+): string {
+  const reasonLine = reason ? `\nNote: ${reason}` : "";
+  if (amount > 0) {
+    return `🌮 You received ${amount} taco${amount === 1 ? "" : "s"} from an admin to spend in the shop: ${shopUrl}${reasonLine}`;
+  }
+  const abs = Math.abs(amount);
+  return `🌮 An admin adjusted your taco balance by ${amount} taco${abs === 1 ? "" : "s"}.${reasonLine}`;
+}
+
 export function reactionRemovedRecipientMessage(
   reactorId: string,
   amount: number,

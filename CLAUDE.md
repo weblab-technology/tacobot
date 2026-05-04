@@ -19,7 +19,8 @@ app/
   shop/page.tsx                    Public catalog (ISR, revalidate=60); renders HR contact link
   admin/layout.tsx                 Auth gate: redirects unauthenticated to signin
   admin/page.tsx                   Admin home
-  admin/users/{page,actions}.tsx   User table + redemption form (deductTacos)
+  admin/users/{page,actions}.tsx   User table + redemption form (deductTacos) + signed-balance adjustment (adjustTacos)
+  admin/users/AdjustForm.tsx       Client component: window.confirm() gate around the Adjust form
   admin/items/{page,actions}.tsx   Items CRUD + Vercel Blob upload
   admin/activity/page.tsx          Chronological feed of give events with reversal status, channel filter, cursor pagination
   admin/leaderboard/page.tsx       Ranked list of givers/receivers with metric (received/given/combined), period, and channel filters
@@ -52,6 +53,7 @@ lib/
     userInfo.ts                    resolveUserName with 1h TTL + in-flight dedup
     botUserId.ts                   getBotUserId() singleton
   admin/redeem.ts                  redeem() — transactional balance deduction
+  admin/grant.ts                   grant() — admin-issued signed balance adjustment (onboarding / normalization)
   date.ts                          formatDayHeading, formatTimeOfDay, localDayKey, periodStart (ISO Monday weeks, UTC boundaries)
 
 drizzle/                           Generated migrations (commit them)
@@ -94,7 +96,7 @@ These are load-bearing. Don't paper over them — fix the underlying issue.
 - **Atomic redeem** (`lib/admin/redeem.ts:17`): same pattern on `balance`. The atomic `WHERE balance >= amount` (not a DB CHECK — `balance >= 0` was relaxed) is what prevents overdraw on redemption.
 - **Append-only reversals** (`lib/slack/reverse.ts`): undoing a give writes a `type='reversal'` row referencing the original via `reversed_transaction_id` (UNIQUE). Counters update too: recipient's `balance`/`receivedTotal` decrement (allowed to go negative), giver's `daily_remaining` is restored capped at `dailyAllowance`. Never UPDATE/DELETE existing transactions — always insert compensation.
 - **Idempotency**: each individual taco is its own `transactions` row keyed by `slack_event_id`. Composite forms: `${envelopeEventId}-${idx}` for messages, `react-${channel}-${ts}-${reactor}-${idx}` for reactions, `delete-${original.id}` / `unreact-${original.id}` for reversals. The UNIQUE constraint + `onConflictDoNothing` makes Slack retries safe; for gives, if any insert returns 0 rows the whole give rolls back as `duplicate`. For reversals, per-row `onConflictDoNothing` on `reversed_transaction_id` lets a partial run resume cleanly.
-- **DB CHECK constraints** (`lib/db/schema.ts`): `dailyRemaining >= 0`, `balance <= receivedTotal`, `priceTacos > 0`, `quantity > 0 OR NULL`, unique `lower(name)` among active items, three-way row shape (give: `fromUserId` set, no admin/item/reversal-ref, no self-give; redeem: `adminUserId` + `itemId` set, no `fromUserId`/reversal-ref; reversal: only `toUserId` and `reversedTransactionId` set, plus UNIQUE on `reversedTransactionId` to block double-reversal). `balance` and `receivedTotal` *may* be negative — they decrement together when a give is reversed after the recipient has already redeemed. Don't bypass with raw SQL.
+- **DB CHECK constraints** (`lib/db/schema.ts`): `dailyRemaining >= 0`, `balance <= receivedTotal`, `priceTacos > 0`, `quantity > 0 OR NULL`, unique `lower(name)` among active items, four-way row shape (give: `fromUserId` set, no admin/item/reversal-ref, no self-give; redeem: `adminUserId` + `itemId` set, no `fromUserId`/reversal-ref; reversal: only `toUserId` and `reversedTransactionId` set, plus UNIQUE on `reversedTransactionId` to block double-reversal; grant: `adminUserId` set, no `fromUserId`/`itemId`/reversal-ref). The amount CHECK is type-conditional: `give`/`redeem`/`reversal` require `amount > 0`, but `grant` only requires `amount <> 0` so admins can issue negative adjustments. `balance` and `receivedTotal` *may* be negative — they decrement together when a give is reversed after the recipient has already redeemed, or when an admin grants a negative amount. Don't bypass with raw SQL.
 - **Auth.js admin gate** (`lib/auth.ts:14`) lives in the `signIn` callback, not a layout redirect. Non-admins never get a session. The admin layout still redirects unauthenticated visitors to `/api/auth/signin?callbackUrl=/admin`.
 - **User-name freshness** (`lib/slack/userInfo.ts`): 1-hour TTL cache + in-flight dedup. Score/leaderboard renders `<@USERID>` mentions so Slack handles current display name + avatar — we never have to re-render the cached name.
 - **Currency emoji set** (`lib/config.ts` → `taco.acceptedEmojis`): `:taco:` is always accepted. If `TACO_ALT_EMOJI_NAME` is set, that custom emoji is *additionally* accepted for both typed mentions and reactions. Read this set via `config.taco.acceptedEmojis` / `config.taco.confirmationEmojiName` — don't hardcode `"taco"` in handlers. The bot's confirmation reaction (`reactions.add`) is gated by `config.taco.reactOnGive` (env `TACO_REACT_ON_GIVE`, default `false`) — `confirmationEmojiName` is only consulted when that flag is on.
@@ -133,6 +135,7 @@ These are load-bearing. Don't paper over them — fix the underlying issue.
 | Add a shop-item field | `lib/db/schema.ts` → `pnpm db:generate` → `app/admin/items/{page,actions}.tsx` → `app/shop/page.tsx` |
 | Change daily-reset time | `vercel.json` cron expression |
 | Change give/redeem rules | `lib/slack/give.ts` + `lib/slack/execute.ts` (or `lib/admin/redeem.ts`) |
+| Add/correct a user's balance from admin panel | `app/admin/users/{page,actions,AdjustForm}.tsx` + `lib/admin/grant.ts` |
 | Change reversal rules (delete/unreact) | `lib/slack/reverse.ts` + handlers in `lib/slack/handlers/{message,reaction}.ts` |
 | Bootstrap users from Slack | `pnpm sync-users` (`scripts/sync-users.ts`) |
 | Add an admin | env: `ADMIN_SLACK_IDS` (comma-separated Slack IDs) + redeploy |

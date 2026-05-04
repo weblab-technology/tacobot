@@ -69,7 +69,7 @@ export const items = pgTable(
 export type Item = typeof items.$inferSelect;
 export type NewItem = typeof items.$inferInsert;
 
-export const transactionType = ["give", "redeem", "reversal"] as const;
+export const transactionType = ["give", "redeem", "reversal", "grant"] as const;
 export type TransactionType = (typeof transactionType)[number];
 
 export const transactions = pgTable(
@@ -92,7 +92,17 @@ export const transactions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    amountPositive: check("transactions_amount_positive", sql`${t.amount} > 0`),
+    // `grant` is the only type that may carry a negative `amount` — admin
+    // adjustments need to clawback during onboarding/normalization. The other
+    // three types keep their `> 0` invariant.
+    amountValid: check(
+      "transactions_amount_valid",
+      sql`(
+        (${t.type} IN ('give','redeem','reversal') AND ${t.amount} > 0)
+        OR
+        (${t.type} = 'grant' AND ${t.amount} <> 0)
+      )`,
+    ),
     shapeAndRule: check(
       "transactions_shape_and_rule",
       sql`(
@@ -114,6 +124,12 @@ export const transactions = pgTable(
           AND ${t.adminUserId} IS NULL
           AND ${t.itemId} IS NULL
           AND ${t.reversedTransactionId} IS NOT NULL)
+        OR
+        (${t.type} = 'grant'
+          AND ${t.fromUserId} IS NULL
+          AND ${t.adminUserId} IS NOT NULL
+          AND ${t.itemId} IS NULL
+          AND ${t.reversedTransactionId} IS NULL)
       )`,
     ),
     toCreatedIdx: index("transactions_to_created").on(t.toUserId, t.createdAt),

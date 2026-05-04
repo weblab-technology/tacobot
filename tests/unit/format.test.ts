@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   giveSuccessGiverMessage,
   giveSuccessRecipientMessage,
+  grantNotificationMessage,
   messageDeletedGiverMessage,
   messageDeletedRecipientMessage,
   overAllowanceMessage,
@@ -183,6 +184,46 @@ describe("reactionRemovedReactorMessage", () => {
       ),
     ).toBe(
       "🌮 You removed your :wltaco: reaction in <#C_TAQ>; reversed:\n<@U_A> lost 1 taco.\n<@U_B> lost 1 taco.",
+    );
+  });
+});
+
+describe("grantNotificationMessage", () => {
+  const SHOP = "https://shop.example";
+
+  test("positive grant — warm wording with shop link, no reason", () => {
+    expect(grantNotificationMessage(5, null, SHOP)).toBe(
+      "🌮 You received 5 tacos from an admin to spend in the shop: https://shop.example",
+    );
+  });
+
+  test("positive grant — appends reason on a new line", () => {
+    expect(grantNotificationMessage(5, "onboarding", SHOP)).toBe(
+      "🌮 You received 5 tacos from an admin to spend in the shop: https://shop.example\nNote: onboarding",
+    );
+  });
+
+  test("positive grant — singular for 1 taco", () => {
+    expect(grantNotificationMessage(1, null, SHOP)).toBe(
+      "🌮 You received 1 taco from an admin to spend in the shop: https://shop.example",
+    );
+  });
+
+  test("negative grant — neutral 'adjusted' wording", () => {
+    expect(grantNotificationMessage(-45, null, SHOP)).toBe(
+      "🌮 An admin adjusted your taco balance by -45 tacos.",
+    );
+  });
+
+  test("negative grant — singular for -1 taco", () => {
+    expect(grantNotificationMessage(-1, null, SHOP)).toBe(
+      "🌮 An admin adjusted your taco balance by -1 taco.",
+    );
+  });
+
+  test("negative grant — appends reason on a new line", () => {
+    expect(grantNotificationMessage(-45, "beta normalization", SHOP)).toBe(
+      "🌮 An admin adjusted your taco balance by -45 tacos.\nNote: beta normalization",
     );
   });
 });
