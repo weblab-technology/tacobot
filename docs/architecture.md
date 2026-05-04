@@ -162,7 +162,7 @@ What happens when someone posts `<@alice> :taco: :taco:` in `#taqueria`:
    - JSON-parses body. If `type === "url_verification"`, returns `{ challenge }`. Otherwise builds a `ReceiverEvent` and calls `app.processEvent`.
 3. Bolt dispatches to the `message` handler in `lib/slack/handlers/message.ts`:
    - Skips edits/deletes/bot messages and non-channel events.
-   - `countTacos(text)` (regex `/:taco:/g`); `findUserIds(text)` (regex `<@(U…)>` with optional `|name`).
+   - `countTacos(text, config.taco.acceptedEmojis)` builds a regex over the active emoji set (always `:taco:`, plus the alt emoji from `TACO_ALT_EMOJI_NAME` if set). `findUserIds(text)` (regex `<@(U…)>` with optional `|name`).
    - Filters out the bot's own user ID (resolved once via `getBotUserId()`).
    - Verifies channel is in `config.taco.channels`.
    - Lazy-upserts giver and recipients (placeholder `name = id`); kicks off `resolveUserName()` for each, then `upsertUser` again with the resolved name (the lazy upsert never overwrites a real name with the raw ID).
@@ -187,7 +187,7 @@ Reactions are simpler: 1 taco per reaction.
 
 1. Slack POSTs `reaction_added`. Receiver verifies as above.
 2. `lib/slack/handlers/reaction.ts:registerReactionHandler`:
-   - Filters: emoji must be `taco`, item must be `message`, channel must be allowlisted.
+   - Filters: emoji must be in `config.taco.acceptedEmojis` (always `taco`, plus the alt emoji if `TACO_ALT_EMOJI_NAME` is set), item must be `message`, channel must be allowlisted.
    - The payload doesn't include the message author, so we call `conversations.history` for that single message (`limit: 1`, `inclusive: true`). Failure → log + return.
    - Calls `processReaction(db, { reactor, author, channelId, messageTs })`. This is the testable core.
 3. `processReaction`:

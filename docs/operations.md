@@ -7,8 +7,9 @@ Runbook for the operator who owns the Tacobot deployment. Covers post-deploy che
 Run this after every deploy. Use the beta channel listed in `TACO_CHANNELS` and a couple of test accounts.
 
 - [ ] Bot is online and a member of every channel listed in `TACO_CHANNELS` (`/invite @tacobot` if not).
-- [ ] Type `<@teammate> :taco:` in an allowlisted channel. Recipient's `received_total` and `balance` increment, your `daily_remaining` decrements, your message gets a 🌮 reaction from the bot.
+- [ ] Type `<@teammate> :taco:` in an allowlisted channel. Recipient's `received_total` and `balance` increment, your `daily_remaining` decrements, your message gets a 🌮 reaction (or `:${TACO_ALT_EMOJI_NAME}:` if set) from the bot.
 - [ ] React to a teammate's message with 🌮. Their balance increments by 1.
+- [ ] **If `TACO_ALT_EMOJI_NAME` is set**: type a give using the alt emoji (`<@teammate> :wltaco:`) and react to a message with the alt emoji. Both should count exactly like `:taco:`, and the bot's confirmation reaction should be the alt emoji.
 - [ ] DM `@tacobot score` — replies with top 5 by lifetime received, names rendered as Slack mentions.
 - [ ] DM `@tacobot balance` — replies with your current balance and the shop URL.
 - [ ] DM `@tacobot left` — replies with your remaining daily allowance.
@@ -293,5 +294,7 @@ Never `UPDATE` or `DELETE` an existing `transactions` row — the schema's CHECK
 | Cron returns 401 | `CRON_SECRET` mismatch or missing `Authorization` header. Vercel injects this automatically for scheduled invocations; manual hits need it explicit. |
 | `pnpm build` fails on Vercel with "Missing required env var: POSTGRES_URL" | The `db:migrate` step in the build script needs `POSTGRES_URL`. Connect a Postgres / Neon integration in Vercel Storage so it's auto-injected. |
 | User reports "I deleted my message but my taco count didn't drop" | Confirm the channel is in `TACO_CHANNELS` and the deletion event was actually delivered (Slack app dashboard → Event Subscriptions → Recent deliveries). The handler skips deletes outside the allowlist. If delivered, look for a `type='reversal'` row keyed `delete-<original-tx-id>`. |
+| Bot confirmation reaction is `:taco:` even though `TACO_ALT_EMOJI_NAME` is set | Most often the alt emoji doesn't exist in the workspace yet — `reactions.add` fails with `invalid_name` and we log `[reactions.add] failed`. Add the emoji in Slack → workspace settings → Customize → Emoji and the next give will react with it. Other causes: env var has colons (rejected at config read with a clear error), or the deploy that set the env var hasn't shipped yet. |
+| Deploy startup throws `Invalid TACO_ALT_EMOJI_NAME` | The value contains characters outside `[a-z0-9_+-]` or includes `:`. Strip the colons (the value is a name, not the literal emoji) and avoid spaces or punctuation. |
 | User says "I removed my reaction then re-added it but they didn't get the taco back" | Working as designed. The composite event ID (`react-${channel}-${ts}-${reactor}-${idx}`) is identical for the second reaction, so `onConflictDoNothing` no-ops. Tell them to give again from a different message. |
 | `received_total` or `balance` is negative for a user | Usually correct: a give was reversed after the recipient already redeemed against it. Run the reconciliation query in this doc to confirm; if `computed = users.*` matches, leave it alone. |

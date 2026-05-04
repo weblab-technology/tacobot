@@ -36,6 +36,10 @@ In an allowlisted channel:
 
 The count of `:taco:` in the message is the number of tacos *each* recipient gets. The bot reacts with 🌮 to confirm. If the message couldn't be processed (over allowance, no recipient, channel not allowlisted), the bot either says nothing or sends you an ephemeral note only you can see.
 
+### Custom currency emoji
+
+Some workspaces also accept a branded custom emoji (e.g. `:wltaco:`) alongside `:taco:`. If your operator set `TACO_ALT_EMOJI_NAME`, you can react with — or type — that emoji and it counts the same. The bot's own confirmation reaction will use the custom emoji in that case. If you're not sure what's enabled here, ask your operator or just use `:taco:` (always works).
+
 What's filtered out:
 
 - Self-gives (`@you :taco:`) — silently ignored.
