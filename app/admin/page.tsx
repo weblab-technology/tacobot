@@ -11,6 +11,7 @@ export default function AdminHome() {
       <h1 className="text-2xl font-bold">Admin</h1>
       <ul className="list-disc pl-6 text-gray-700">
         <li><Link href="/admin/activity" className="text-blue-600 hover:underline">Activity log</Link></li>
+        <li><Link href="/admin/leaderboard" className="text-blue-600 hover:underline">Leaderboard</Link></li>
         <li><Link href="/admin/users" className="text-blue-600 hover:underline">Users & redemption</Link></li>
         <li><Link href="/admin/items" className="text-blue-600 hover:underline">Items catalog</Link></li>
       </ul>

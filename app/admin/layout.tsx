@@ -25,6 +25,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           <Link href="/admin" className="text-lg font-semibold">🌮 Tacobot Admin</Link>
           <div className="flex items-center gap-4 text-sm">
             <Link href="/admin/activity" className="text-gray-700 hover:text-gray-900">Activity</Link>
+            <Link href="/admin/leaderboard" className="text-gray-700 hover:text-gray-900">Leaderboard</Link>
             <Link href="/admin/users" className="text-gray-700 hover:text-gray-900">Users</Link>
             <Link href="/admin/items" className="text-gray-700 hover:text-gray-900">Items</Link>
             <form
