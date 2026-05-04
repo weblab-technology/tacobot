@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import { sql } from "drizzle-orm";
 import { inRollbackTx } from "./helpers/db";
 import { upsertUser, getLeaderboard } from "@/lib/db/queries";
 import { transactions } from "@/lib/db/schema";
@@ -194,5 +195,55 @@ test("period filter: only counts gives whose created_at is >= since", async () =
       channel: null,
     });
     expect(rows).toEqual([{ userId: "U_A", total: 5 }]);
+  });
+});
+
+test("channel filter: excludes gives in other channels", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_GIVER", name: "Giver", dailyAllowance: 50 });
+    await upsertUser(tx, { id: "U_A", name: "A", dailyAllowance: 5 });
+
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_A", amount: 1, channel: "C_X", eventId: "x" });
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_A", amount: 4, channel: "C_Y", eventId: "y" });
+
+    const rows = await getLeaderboard(tx, {
+      metric: "received",
+      since: null,
+      channel: "C_Y",
+    });
+    expect(rows).toEqual([{ userId: "U_A", total: 4 }]);
+  });
+});
+
+test("inactive users are excluded even when they have received tacos", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_GIVER", name: "Giver", dailyAllowance: 50 });
+    await upsertUser(tx, { id: "U_GONE", name: "Gone", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_HERE", name: "Here", dailyAllowance: 5 });
+    // Deactivate U_GONE
+    await tx.execute(sql`UPDATE users SET is_active = false WHERE id = 'U_GONE'`);
+
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_GONE", amount: 7, eventId: "g1" });
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_HERE", amount: 2, eventId: "g2" });
+
+    const rows = await getLeaderboard(tx, { metric: "received", since: null, channel: null });
+    expect(rows).toEqual([{ userId: "U_HERE", total: 2 }]);
+  });
+});
+
+test("tie-break: equal totals order by user_id ascending", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_GIVER", name: "Giver", dailyAllowance: 50 });
+    await upsertUser(tx, { id: "U_B", name: "B", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_A", name: "A", dailyAllowance: 5 });
+
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_B", amount: 3, eventId: "b" });
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_A", amount: 3, eventId: "a" });
+
+    const rows = await getLeaderboard(tx, { metric: "received", since: null, channel: null });
+    expect(rows).toEqual([
+      { userId: "U_A", total: 3 },
+      { userId: "U_B", total: 3 },
+    ]);
   });
 });
