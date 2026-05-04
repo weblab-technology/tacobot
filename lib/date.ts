@@ -29,6 +29,27 @@ export function localDayKey(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+export type LeaderboardPeriod = "all" | "today" | "week" | "month";
+
+/**
+ * Lower-bound Date (inclusive) for a leaderboard period, or null for "all".
+ * Boundaries are computed in UTC so they align with the bot's daily reset.
+ * Week starts Monday (ISO week).
+ */
+export function periodStart(period: LeaderboardPeriod, now: Date): Date | null {
+  if (period === "all") return null;
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const d = now.getUTCDate();
+  if (period === "today") return new Date(Date.UTC(y, m, d));
+  if (period === "month") return new Date(Date.UTC(y, m, 1));
+  // week — most recent Monday 00:00 UTC. JS getUTCDay: Sun=0..Sat=6.
+  // Days to subtract so we land on Monday: Sun→6, Mon→0, Tue→1, ...
+  const dow = now.getUTCDay();
+  const daysSinceMonday = (dow + 6) % 7;
+  return new Date(Date.UTC(y, m, d - daysSinceMonday));
+}
+
 function ordinalSuffix(n: number): string {
   // 11–13 are always "th" regardless of last digit.
   const mod100 = n % 100;
