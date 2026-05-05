@@ -108,4 +108,4 @@ Requirements:
 - The emoji must already exist in the workspace's custom emoji set (Slack → workspace settings → Customize → Emoji). The bot doesn't create it.
 - The bot's existing `reactions:write` scope (step 2) is enough to add the alt emoji as its confirmation reaction (when enabled — see `TACO_REACT_ON_GIVE` below); no extra scope.
 
-When set, both `:taco:` and the alt emoji count for typed mentions and reactions. If `TACO_REACT_ON_GIVE=true` (default `false`), the bot's own confirmation reaction uses the alt emoji.
+When set, both `:taco:` and the alt emoji count for typed mentions and reactions. If `TACO_REACT_ON_GIVE=true` (default `false`), the bot's own confirmation reaction uses the alt emoji. The bot's DM/reply prose (over-allowance ephemeral, give-success summaries, reversal notifications, grant DMs, leaderboard/help replies) also leads with the alt emoji's shortcode, so the workspace branding shows everywhere the bot speaks. The exception is reaction-removed DMs, which echo whichever emoji was actually removed, and the help text's instructional `:taco:` (always literal — `:taco:` is always in the accepted set).
