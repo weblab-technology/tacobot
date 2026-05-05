@@ -145,7 +145,11 @@ export function registerReactionHandler(app: App) {
       await client.chat.postEphemeral({
         channel: event.item.channel,
         user: event.user,
-        text: overAllowanceMessage(outcome.demand, outcome.remaining),
+        text: overAllowanceMessage(
+          outcome.demand,
+          outcome.remaining,
+          config.taco.confirmationEmojiName,
+        ),
       });
       return;
     }

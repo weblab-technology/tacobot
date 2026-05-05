@@ -80,12 +80,24 @@ describe("giveSuccessRecipientMessage", () => {
 
 describe("overAllowanceMessage", () => {
   test("renders demand and remaining with plural", () => {
-    expect(overAllowanceMessage(3, 2)).toContain("only got 2 tacos left");
-    expect(overAllowanceMessage(3, 2)).toContain("would need 3");
+    expect(overAllowanceMessage(3, 2, "taco")).toContain("only got 2 tacos left");
+    expect(overAllowanceMessage(3, 2, "taco")).toContain("would need 3");
   });
 
   test("singular when 1 remains", () => {
-    expect(overAllowanceMessage(3, 1)).toContain("only got 1 taco left");
+    expect(overAllowanceMessage(3, 1, "taco")).toContain("only got 1 taco left");
+  });
+
+  test("default emoji prefix is :taco:", () => {
+    expect(overAllowanceMessage(3, 2, "taco")).toBe(
+      ":taco: You've only got 2 tacos left today; that would need 3. Try again tomorrow.",
+    );
+  });
+
+  test("alt emoji name renders as the leading shortcode", () => {
+    expect(overAllowanceMessage(3, 2, "wltaco")).toBe(
+      ":wltaco: You've only got 2 tacos left today; that would need 3. Try again tomorrow.",
+    );
   });
 });
 
@@ -103,8 +115,9 @@ describe("messageDeletedGiverMessage", () => {
     expect(messageDeletedGiverMessage(
       reversed([{ giver: "U_G", recipient: "U_R", amount: 1 }]),
       "C_TAQ",
+      "taco",
     )).toBe(
-      "🌮 A message in <#C_TAQ> was deleted; the tacos you gave in connection with it were taken back:\n<@U_R> lost 1 taco.",
+      ":taco: A message in <#C_TAQ> was deleted; the tacos you gave in connection with it were taken back:\n<@U_R> lost 1 taco.",
     );
   });
 
@@ -116,37 +129,60 @@ describe("messageDeletedGiverMessage", () => {
           { giver: "U_G", recipient: "U_B", amount: 3 },
         ]),
         "C_TAQ",
+        "taco",
       ),
     ).toBe(
-      "🌮 A message in <#C_TAQ> was deleted; the tacos you gave in connection with it were taken back:\n<@U_A> lost 2 tacos.\n<@U_B> lost 3 tacos.",
+      ":taco: A message in <#C_TAQ> was deleted; the tacos you gave in connection with it were taken back:\n<@U_A> lost 2 tacos.\n<@U_B> lost 3 tacos.",
+    );
+  });
+
+  test("alt emoji name renders as the leading shortcode", () => {
+    expect(
+      messageDeletedGiverMessage(
+        reversed([{ giver: "U_G", recipient: "U_R", amount: 1 }]),
+        "C_TAQ",
+        "wltaco",
+      ),
+    ).toBe(
+      ":wltaco: A message in <#C_TAQ> was deleted; the tacos you gave in connection with it were taken back:\n<@U_R> lost 1 taco.",
     );
   });
 });
 
 describe("messageDeletedRecipientMessage", () => {
   test("singular phrasing for 1 taco — neutral about who deleted", () => {
-    expect(messageDeletedRecipientMessage("U_G", 1, "C_TAQ")).toBe(
-      "🌮 A message in <#C_TAQ> was deleted; 1 taco you received from <@U_G> was taken back.",
+    expect(messageDeletedRecipientMessage("U_G", 1, "C_TAQ", "taco")).toBe(
+      ":taco: A message in <#C_TAQ> was deleted; 1 taco you received from <@U_G> was taken back.",
     );
   });
 
   test("plural phrasing for >1 tacos", () => {
-    expect(messageDeletedRecipientMessage("U_G", 4, "C_TAQ")).toBe(
-      "🌮 A message in <#C_TAQ> was deleted; 4 tacos you received from <@U_G> were taken back.",
+    expect(messageDeletedRecipientMessage("U_G", 4, "C_TAQ", "taco")).toBe(
+      ":taco: A message in <#C_TAQ> was deleted; 4 tacos you received from <@U_G> were taken back.",
+    );
+  });
+
+  test("alt emoji name renders as the leading shortcode", () => {
+    expect(messageDeletedRecipientMessage("U_G", 1, "C_TAQ", "wltaco")).toBe(
+      ":wltaco: A message in <#C_TAQ> was deleted; 1 taco you received from <@U_G> was taken back.",
     );
   });
 });
 
 describe("reactionRemovedReactorMessage", () => {
   test("single recipient, 1 taco — singular", () => {
-    expect(reactionRemovedReactorMessage([{ recipientId: "U_R", amount: 1 }], "C_TAQ")).toBe(
-      "🌮 You removed your :taco: reaction in <#C_TAQ>; 1 taco was taken back from <@U_R>.",
+    expect(
+      reactionRemovedReactorMessage([{ recipientId: "U_R", amount: 1 }], "C_TAQ", "taco"),
+    ).toBe(
+      ":taco: You removed your :taco: reaction in <#C_TAQ>; 1 taco was taken back from <@U_R>.",
     );
   });
 
   test("single recipient, >1 tacos — plural", () => {
-    expect(reactionRemovedReactorMessage([{ recipientId: "U_R", amount: 2 }], "C_TAQ")).toBe(
-      "🌮 You removed your :taco: reaction in <#C_TAQ>; 2 tacos were taken back from <@U_R>.",
+    expect(
+      reactionRemovedReactorMessage([{ recipientId: "U_R", amount: 2 }], "C_TAQ", "taco"),
+    ).toBe(
+      ":taco: You removed your :taco: reaction in <#C_TAQ>; 2 tacos were taken back from <@U_R>.",
     );
   });
 
@@ -158,9 +194,10 @@ describe("reactionRemovedReactorMessage", () => {
           { recipientId: "U_B", amount: 1 },
         ],
         "C_TAQ",
+        "taco",
       ),
     ).toBe(
-      "🌮 You removed your :taco: reaction in <#C_TAQ>; reversed:\n<@U_A> lost 1 taco.\n<@U_B> lost 1 taco.",
+      ":taco: You removed your :taco: reaction in <#C_TAQ>; reversed:\n<@U_A> lost 1 taco.\n<@U_B> lost 1 taco.",
     );
   });
 
@@ -168,7 +205,7 @@ describe("reactionRemovedReactorMessage", () => {
     expect(
       reactionRemovedReactorMessage([{ recipientId: "U_R", amount: 1 }], "C_TAQ", "wltaco"),
     ).toBe(
-      "🌮 You removed your :wltaco: reaction in <#C_TAQ>; 1 taco was taken back from <@U_R>.",
+      ":wltaco: You removed your :wltaco: reaction in <#C_TAQ>; 1 taco was taken back from <@U_R>.",
     );
   });
 
@@ -183,7 +220,7 @@ describe("reactionRemovedReactorMessage", () => {
         "wltaco",
       ),
     ).toBe(
-      "🌮 You removed your :wltaco: reaction in <#C_TAQ>; reversed:\n<@U_A> lost 1 taco.\n<@U_B> lost 1 taco.",
+      ":wltaco: You removed your :wltaco: reaction in <#C_TAQ>; reversed:\n<@U_A> lost 1 taco.\n<@U_B> lost 1 taco.",
     );
   });
 });
@@ -192,58 +229,64 @@ describe("grantNotificationMessage", () => {
   const SHOP = "https://shop.example";
 
   test("positive grant — warm wording with shop link, no reason", () => {
-    expect(grantNotificationMessage(5, null, SHOP)).toBe(
-      "🌮 You received 5 tacos from an admin to spend in the shop: https://shop.example",
+    expect(grantNotificationMessage(5, null, SHOP, "taco")).toBe(
+      ":taco: You received 5 tacos from an admin to spend in the shop: https://shop.example",
     );
   });
 
   test("positive grant — appends reason on a new line", () => {
-    expect(grantNotificationMessage(5, "onboarding", SHOP)).toBe(
-      "🌮 You received 5 tacos from an admin to spend in the shop: https://shop.example\nNote: onboarding",
+    expect(grantNotificationMessage(5, "onboarding", SHOP, "taco")).toBe(
+      ":taco: You received 5 tacos from an admin to spend in the shop: https://shop.example\nNote: onboarding",
     );
   });
 
   test("positive grant — singular for 1 taco", () => {
-    expect(grantNotificationMessage(1, null, SHOP)).toBe(
-      "🌮 You received 1 taco from an admin to spend in the shop: https://shop.example",
+    expect(grantNotificationMessage(1, null, SHOP, "taco")).toBe(
+      ":taco: You received 1 taco from an admin to spend in the shop: https://shop.example",
     );
   });
 
   test("negative grant — neutral 'adjusted' wording", () => {
-    expect(grantNotificationMessage(-45, null, SHOP)).toBe(
-      "🌮 An admin adjusted your taco balance by -45 tacos.",
+    expect(grantNotificationMessage(-45, null, SHOP, "taco")).toBe(
+      ":taco: An admin adjusted your taco balance by -45 tacos.",
     );
   });
 
   test("negative grant — singular for -1 taco", () => {
-    expect(grantNotificationMessage(-1, null, SHOP)).toBe(
-      "🌮 An admin adjusted your taco balance by -1 taco.",
+    expect(grantNotificationMessage(-1, null, SHOP, "taco")).toBe(
+      ":taco: An admin adjusted your taco balance by -1 taco.",
     );
   });
 
   test("negative grant — appends reason on a new line", () => {
-    expect(grantNotificationMessage(-45, "beta normalization", SHOP)).toBe(
-      "🌮 An admin adjusted your taco balance by -45 tacos.\nNote: beta normalization",
+    expect(grantNotificationMessage(-45, "beta normalization", SHOP, "taco")).toBe(
+      ":taco: An admin adjusted your taco balance by -45 tacos.\nNote: beta normalization",
+    );
+  });
+
+  test("alt emoji name renders as the leading shortcode (positive grant)", () => {
+    expect(grantNotificationMessage(5, null, SHOP, "wltaco")).toBe(
+      ":wltaco: You received 5 tacos from an admin to spend in the shop: https://shop.example",
     );
   });
 });
 
 describe("reactionRemovedRecipientMessage", () => {
   test("singular phrasing for 1 taco", () => {
-    expect(reactionRemovedRecipientMessage("U_REACT", 1, "C_TAQ")).toBe(
-      "🌮 <@U_REACT> removed their :taco: reaction in <#C_TAQ>; 1 taco you received from them was taken back.",
+    expect(reactionRemovedRecipientMessage("U_REACT", 1, "C_TAQ", "taco")).toBe(
+      ":taco: <@U_REACT> removed their :taco: reaction in <#C_TAQ>; 1 taco you received from them was taken back.",
     );
   });
 
   test("plural phrasing for >1 tacos", () => {
-    expect(reactionRemovedRecipientMessage("U_REACT", 3, "C_TAQ")).toBe(
-      "🌮 <@U_REACT> removed their :taco: reaction in <#C_TAQ>; 3 tacos you received from them were taken back.",
+    expect(reactionRemovedRecipientMessage("U_REACT", 3, "C_TAQ", "taco")).toBe(
+      ":taco: <@U_REACT> removed their :taco: reaction in <#C_TAQ>; 3 tacos you received from them were taken back.",
     );
   });
 
   test("echoes the alt emoji name when provided", () => {
     expect(reactionRemovedRecipientMessage("U_REACT", 1, "C_TAQ", "wltaco")).toBe(
-      "🌮 <@U_REACT> removed their :wltaco: reaction in <#C_TAQ>; 1 taco you received from them was taken back.",
+      ":wltaco: <@U_REACT> removed their :wltaco: reaction in <#C_TAQ>; 1 taco you received from them was taken back.",
     );
   });
 });

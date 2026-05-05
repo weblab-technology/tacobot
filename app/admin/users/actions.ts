@@ -53,7 +53,12 @@ export async function adjustTacos(formData: FormData) {
   try {
     await getBoltApp().client.chat.postMessage({
       channel: recipientId,
-      text: grantNotificationMessage(amount, reason, config.shopUrl),
+      text: grantNotificationMessage(
+        amount,
+        reason,
+        config.shopUrl,
+        config.taco.confirmationEmojiName,
+      ),
     });
   } catch (err) {
     console.error("grant DM failed", err);

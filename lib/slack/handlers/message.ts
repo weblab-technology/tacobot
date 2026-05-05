@@ -103,7 +103,7 @@ export function registerMessageHandler(app: App) {
       await client.chat.postEphemeral({
         channel: channelId,
         user: giverId,
-        text: overAllowanceMessage(v.demand, v.remaining),
+        text: overAllowanceMessage(v.demand, v.remaining, config.taco.confirmationEmojiName),
       });
       return;
     }
@@ -124,7 +124,11 @@ export function registerMessageHandler(app: App) {
       await client.chat.postEphemeral({
         channel: channelId,
         user: giverId,
-        text: overAllowanceMessage(plan.giverDecrement, giver.dailyRemaining),
+        text: overAllowanceMessage(
+          plan.giverDecrement,
+          giver.dailyRemaining,
+          config.taco.confirmationEmojiName,
+        ),
       });
       return;
     }
@@ -192,7 +196,7 @@ async function notifyMessageReversal(
     try {
       await client.chat.postMessage({
         channel: giverId,
-        text: messageDeletedGiverMessage(items, channelId),
+        text: messageDeletedGiverMessage(items, channelId, config.taco.confirmationEmojiName),
       });
     } catch (err) {
       console.warn("[chat.postMessage reversal giver] failed", err);
@@ -204,7 +208,12 @@ async function notifyMessageReversal(
       try {
         await client.chat.postMessage({
           channel: recipientId,
-          text: messageDeletedRecipientMessage(giverId, amount, channelId),
+          text: messageDeletedRecipientMessage(
+            giverId,
+            amount,
+            channelId,
+            config.taco.confirmationEmojiName,
+          ),
         });
       } catch (err) {
         console.warn("[chat.postMessage reversal recipient] failed", err);

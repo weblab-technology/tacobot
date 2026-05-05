@@ -22,15 +22,21 @@ async function topReceivers(limit = 5) {
 }
 
 function formatScore(rows: { id: string; received: number }[]): string {
-  if (rows.length === 0) return "🌮 No tacos given yet — be the first!";
+  const emoji = `:${config.taco.confirmationEmojiName}:`;
+  if (rows.length === 0) return `${emoji} No tacos given yet — be the first!`;
   // Use <@USERID> mentions; Slack renders these as the user's current display
   // name with avatar, so we don't have to keep our `name` column in sync with
   // profile changes.
-  const lines = rows.map((r, i) => `${i + 1}. <@${r.id}> — ${r.received} 🌮`);
+  const lines = rows.map((r, i) => `${i + 1}. <@${r.id}> — ${r.received} ${emoji}`);
   return ["*Top taco receivers (lifetime)*", ...lines].join("\n");
 }
 
-const HELP_TEXT = `🌮 *Tacobot commands*
+// Built lazily so the leading branding emoji follows the current
+// `TACO_ALT_EMOJI_NAME` config; the instructional `:taco:` and 🌮 in the last
+// line stay literal because `:taco:` is always in the accepted set.
+function helpText(): string {
+  const emoji = `:${config.taco.confirmationEmojiName}:`;
+  return `${emoji} *Tacobot commands*
 • \`score\`/\`ranking\` — top 5 taco receivers
 • \`balance\`/\`wallet\` — what you can spend in the shop
 • \`left\`/\`how many\`/\`combien\` — tacos you have left to give today
@@ -38,6 +44,7 @@ const HELP_TEXT = `🌮 *Tacobot commands*
 • \`help\`/\`aide\`/\`commandes\` — this message
 
 To give a taco, type \`@person :taco:\` in #taqueria, or react to their message with 🌮.`;
+}
 
 async function dispatch(text: string, userId: string): Promise<string | null> {
   const t = text.trim();
@@ -65,7 +72,7 @@ async function dispatch(text: string, userId: string): Promise<string | null> {
     return `Shop: ${config.shopUrl}`;
   }
   if (COMMAND_RE.help.test(t)) {
-    return HELP_TEXT;
+    return helpText();
   }
   return null;
 }
