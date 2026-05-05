@@ -27,7 +27,7 @@ Slack app dashboard → **OAuth & Permissions** → **Bot Token Scopes**. Add:
 
 **Event Subscriptions** → toggle **Enable Events** on.
 
-- Request URL: `https://<deploy-host>/api/slack/events`
+- Request URL: `https://tacobot.weblab.technology/api/slack/events`
   - During setup, point at a Vercel preview URL.
   - On launch, flip to the production URL.
 - Subscribe to bot events:
@@ -49,7 +49,7 @@ Save changes. Slack issues a verification challenge against the request URL; the
 
 **OAuth & Permissions** → **Redirect URLs**. Add:
 
-- `https://<deploy-host>/api/auth/callback/slack`
+- `https://tacobot.weblab.technology/api/auth/callback/slack`
 
 In **OpenID Connect** (or **User Token Scopes**, depending on the dashboard layout), add:
 

@@ -16,7 +16,7 @@ If you can't sign in or the shop doesn't show your handle, ask your operator to 
 
 ## Signing in
 
-1. Go to `https://<your-deploy-host>/admin`. (Your operator will tell you the URL — typically `tacobot.<your-domain>` or a `vercel.app` host.)
+1. Go to `https://tacobot.weblab.technology/admin`.
 2. You'll be redirected to **Sign in with Slack**. Approve the OAuth prompt with the workspace account whose Slack ID is in `ADMIN_SLACK_IDS`.
 3. After sign-in you land on `/admin` with links to **Activity**, **Leaderboard**, **Users**, and **Items**.
 

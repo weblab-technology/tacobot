@@ -274,7 +274,7 @@ against the production `POSTGRES_URL` (set in `.env.local`). It paginates throug
 If the daily reset didn't run, hit the endpoint manually from somewhere with the secret:
 
 ```bash
-curl -X POST "https://<deploy-host>/api/cron/reset-allowance" \
+curl -X POST "https://tacobot.weblab.technology/api/cron/reset-allowance" \
   -H "Authorization: Bearer $CRON_SECRET"
 ```
 
