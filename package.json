@@ -19,7 +19,9 @@
     "db:studio": "drizzle-kit studio",
     "sync-users": "tsx scripts/sync-users.ts",
     "zero-balances": "tsx --env-file=.env.local scripts/zero-balances.ts",
-    "snapshot-db": "tsx --env-file=.env.local scripts/snapshot-db.ts"
+    "snapshot-db": "tsx --env-file=.env.local scripts/snapshot-db.ts",
+    "reset-allowance": "tsx --env-file=.env.local scripts/reset-allowance.ts",
+    "purge-channel-history": "tsx --env-file=.env.local scripts/purge-channel-history.ts"
   },
   "dependencies": {
     "@slack/bolt": "^4.0.0",
