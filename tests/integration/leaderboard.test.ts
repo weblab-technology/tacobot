@@ -1,8 +1,13 @@
 import { test, expect } from "vitest";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { inRollbackTx } from "./helpers/db";
 import { upsertUser, getLeaderboard } from "@/lib/db/queries";
-import { transactions } from "@/lib/db/schema";
+import { transactions, users } from "@/lib/db/schema";
+
+// Seed helpers mirror what production paths (executeGive, grant, reverse)
+// do to the cached counters on `users` — leaderboard queries can read those
+// counters directly for unfiltered views, so tests must keep them coherent
+// with the transactions they insert.
 
 async function seedGive(
   tx: Parameters<Parameters<typeof inRollbackTx>[0]>[0],
@@ -31,6 +36,13 @@ async function seedGive(
       ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
     })
     .returning({ id: transactions.id });
+  await tx
+    .update(users)
+    .set({
+      balance: sql`${users.balance} + ${opts.amount}`,
+      receivedTotal: sql`${users.receivedTotal} + ${opts.amount}`,
+    })
+    .where(eq(users.id, opts.toId));
   return row.id;
 }
 
@@ -46,6 +58,33 @@ async function seedReversal(
     slackEventId: opts.eventId,
     ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
   });
+  await tx
+    .update(users)
+    .set({
+      balance: sql`${users.balance} - ${opts.amount}`,
+      receivedTotal: sql`${users.receivedTotal} - ${opts.amount}`,
+    })
+    .where(eq(users.id, opts.toId));
+}
+
+async function seedGrant(
+  tx: Parameters<Parameters<typeof inRollbackTx>[0]>[0],
+  opts: { adminId: string; toId: string; amount: number; createdAt?: Date },
+) {
+  await tx.insert(transactions).values({
+    type: "grant",
+    adminUserId: opts.adminId,
+    toUserId: opts.toId,
+    amount: opts.amount,
+    ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
+  });
+  await tx
+    .update(users)
+    .set({
+      balance: sql`${users.balance} + ${opts.amount}`,
+      receivedTotal: sql`${users.receivedTotal} + ${opts.amount}`,
+    })
+    .where(eq(users.id, opts.toId));
 }
 
 test("received: ranks active users by net received tacos, descending", async () => {
@@ -301,6 +340,206 @@ test("redeemable: ignores period and channel filters", async () => {
     });
 
     expect(rows).toEqual([{ userId: "U_A", total: 6 }]);
+  });
+});
+
+test("received: positive grant adds to user's total", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_ADMIN", name: "Admin", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_GIVER", name: "Giver", dailyAllowance: 50 });
+    await upsertUser(tx, { id: "U_A", name: "A", dailyAllowance: 5 });
+
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_A", amount: 2, eventId: "g1" });
+    await seedGrant(tx, { adminId: "U_ADMIN", toId: "U_A", amount: 5 });
+
+    const rows = await getLeaderboard(tx, { metric: "received", since: null, channel: null });
+    expect(rows).toEqual([{ userId: "U_A", total: 7 }]);
+  });
+});
+
+test("received: negative grant (zero-balances reset) reduces user's total below gives", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_ADMIN", name: "Admin", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_GIVER", name: "Giver", dailyAllowance: 50 });
+    await upsertUser(tx, { id: "U_MAXX", name: "Maxx", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_ME", name: "Me", dailyAllowance: 5 });
+
+    // Pre-reset gives
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_MAXX", amount: 1, eventId: "pre1" });
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_MAXX", amount: 1, eventId: "pre2" });
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_MAXX", amount: 1, eventId: "pre3" });
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_ME", amount: 1, eventId: "pre4" });
+
+    // Zero-balances reset zeros pre-reset receipts via signed grants.
+    await seedGrant(tx, { adminId: "U_ADMIN", toId: "U_MAXX", amount: -3 });
+    await seedGrant(tx, { adminId: "U_ADMIN", toId: "U_ME", amount: -1 });
+
+    // Post-reset gives
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_MAXX", amount: 2, eventId: "post1" });
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_MAXX", amount: 1, eventId: "post2" });
+
+    const rows = await getLeaderboard(tx, { metric: "received", since: null, channel: null });
+    // Maxx: 1+1+1-3+2+1 = 3; Me: 1-1 = 0 (filtered by HAVING > 0)
+    expect(rows).toEqual([{ userId: "U_MAXX", total: 3 }]);
+  });
+});
+
+test("received: grant outside the period window is excluded", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_ADMIN", name: "Admin", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_A", name: "A", dailyAllowance: 5 });
+
+    // Grant before the window — should NOT count
+    await seedGrant(tx, {
+      adminId: "U_ADMIN",
+      toId: "U_A",
+      amount: 5,
+      createdAt: new Date("2026-05-01T00:00:00Z"),
+    });
+    // Grant inside the window — should count
+    await seedGrant(tx, {
+      adminId: "U_ADMIN",
+      toId: "U_A",
+      amount: 2,
+      createdAt: new Date("2026-05-04T12:00:00Z"),
+    });
+
+    const rows = await getLeaderboard(tx, {
+      metric: "received",
+      since: new Date("2026-05-04T00:00:00Z"),
+      channel: null,
+    });
+    expect(rows).toEqual([{ userId: "U_A", total: 2 }]);
+  });
+});
+
+test("received: channel filter excludes all grants (grants have no channel)", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_ADMIN", name: "Admin", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_GIVER", name: "Giver", dailyAllowance: 50 });
+    await upsertUser(tx, { id: "U_A", name: "A", dailyAllowance: 5 });
+
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_A", amount: 3, channel: "C_X", eventId: "x" });
+    // Grant to U_A — should be ignored under any channel filter
+    await seedGrant(tx, { adminId: "U_ADMIN", toId: "U_A", amount: 100 });
+
+    const rows = await getLeaderboard(tx, {
+      metric: "received",
+      since: null,
+      channel: "C_X",
+    });
+    expect(rows).toEqual([{ userId: "U_A", total: 3 }]);
+  });
+});
+
+test("given: grants do not appear in given metric", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_ADMIN", name: "Admin", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_A", name: "A", dailyAllowance: 5 });
+
+    // Admin issues a grant — must NOT count as given by admin.
+    await seedGrant(tx, { adminId: "U_ADMIN", toId: "U_A", amount: 10 });
+
+    const rows = await getLeaderboard(tx, { metric: "given", since: null, channel: null });
+    expect(rows).toEqual([]);
+  });
+});
+
+test("combined: includes grant net on the receiving side", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_ADMIN", name: "Admin", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_GIVER", name: "Giver", dailyAllowance: 50 });
+    await upsertUser(tx, { id: "U_A", name: "A", dailyAllowance: 5 });
+
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_A", amount: 2, eventId: "g1" });
+    await seedGrant(tx, { adminId: "U_ADMIN", toId: "U_A", amount: 3 });
+
+    const rows = await getLeaderboard(tx, { metric: "combined", since: null, channel: null });
+    // U_A: 5 received + 0 given = 5; U_GIVER: 0 received + 2 given = 2
+    expect(rows).toEqual([
+      { userId: "U_A", total: 5 },
+      { userId: "U_GIVER", total: 2 },
+    ]);
+  });
+});
+
+test("received: user with only grants (no peer gives) appears on leaderboard", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_ADMIN", name: "Admin", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_NEW", name: "New", dailyAllowance: 5 });
+
+    await seedGrant(tx, { adminId: "U_ADMIN", toId: "U_NEW", amount: 4 });
+
+    const rows = await getLeaderboard(tx, { metric: "received", since: null, channel: null });
+    expect(rows).toEqual([{ userId: "U_NEW", total: 4 }]);
+  });
+});
+
+test("received (all-time): trusts users.received_total when transactions diverge (post-purge)", async () => {
+  // Reproduces the GA scenario: pre-cutover gives + a zero-balances grant in
+  // `transactions`, followed by `purge-channel-history` hard-deleting the
+  // pre-cutover gives without touching cached counters. Aggregating from
+  // `transactions` would net to a negative or zero, but `users.received_total`
+  // is the source of truth for lifetime receipts.
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_ADMIN", name: "Admin", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_GIVER", name: "Giver", dailyAllowance: 50 });
+    await upsertUser(tx, { id: "U_MAXX", name: "Maxx", dailyAllowance: 5 });
+
+    // Surviving post-purge gives + the (now-orphan) zero-balances grant.
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_MAXX", amount: 2, eventId: "post1" });
+    await seedGive(tx, { fromId: "U_GIVER", toId: "U_MAXX", amount: 1, eventId: "post2" });
+    await seedGrant(tx, { adminId: "U_ADMIN", toId: "U_MAXX", amount: -9 });
+
+    // Force the cached counter to the value the production scenario shows
+    // (3) — what `users.received_total` would read after the purge ran
+    // between the zero-balances and the post-reset gives.
+    await tx.execute(
+      sql`UPDATE users SET received_total = 3, balance = 3 WHERE id = 'U_MAXX'`,
+    );
+
+    const rows = await getLeaderboard(tx, { metric: "received", since: null, channel: null });
+    expect(rows).toEqual([{ userId: "U_MAXX", total: 3 }]);
+  });
+});
+
+test("received (filtered): still aggregates from transactions even when counter diverges", async () => {
+  // Period and channel filters can't be answered by the cached counter, so
+  // they fall back to transaction aggregation. Tests that the fallback path
+  // is reachable.
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_GIVER", name: "Giver", dailyAllowance: 50 });
+    await upsertUser(tx, { id: "U_A", name: "A", dailyAllowance: 5 });
+
+    await seedGive(tx, {
+      fromId: "U_GIVER",
+      toId: "U_A",
+      amount: 4,
+      eventId: "g1",
+      createdAt: new Date("2026-05-04T01:00:00Z"),
+    });
+    // Manually pull received_total below what transactions imply.
+    await tx.execute(sql`UPDATE users SET received_total = 0, balance = 0 WHERE id = 'U_A'`);
+
+    const rows = await getLeaderboard(tx, {
+      metric: "received",
+      since: new Date("2026-05-04T00:00:00Z"),
+      channel: null,
+    });
+    expect(rows).toEqual([{ userId: "U_A", total: 4 }]);
+  });
+});
+
+test("received: inactive recipient excluded even with positive grant", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_ADMIN", name: "Admin", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_GONE", name: "Gone", dailyAllowance: 5 });
+    await tx.execute(sql`UPDATE users SET is_active = false WHERE id = 'U_GONE'`);
+
+    await seedGrant(tx, { adminId: "U_ADMIN", toId: "U_GONE", amount: 9 });
+
+    const rows = await getLeaderboard(tx, { metric: "received", since: null, channel: null });
+    expect(rows).toEqual([]);
   });
 });
 

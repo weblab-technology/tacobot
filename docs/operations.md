@@ -30,7 +30,7 @@ Run this after every deploy. Use the beta channel listed in `TACO_CHANNELS` and 
 
 ## Audit queries
 
-The `transactions` table is the append-only audit log. Four row types: `give`, `redeem`, `reversal`, `grant`. A `reversal` references the original `give` via `reversed_transaction_id` and never modifies it; a `grant` is an admin-issued signed adjustment (positive or negative). Most analytics want "net" numbers — gives that weren't reversed — so queries below subtract reversed gives explicitly. Grants don't appear in give/receive analytics by default (they aren't peer-to-peer recognition); they show up in reconciliation and in dedicated grant queries.
+The `transactions` table is the append-only audit log. Four row types: `give`, `redeem`, `reversal`, `grant`. A `reversal` references the original `give` via `reversed_transaction_id` and never modifies it; a `grant` is an admin-issued signed adjustment (positive or negative). Most analytics want "net" numbers — gives that weren't reversed — so queries below subtract reversed gives explicitly. The audit SQL in this section treats peer gives separately from grants; if you want a "net" matching `users.received_total`, add the `grant` amounts on the receiving side (the admin leaderboard's `received` and `combined` metrics already do this — see `lib/db/queries.ts:getLeaderboard`).
 
 Run via `pnpm db:studio` or `psql $POSTGRES_URL`.
 
@@ -317,7 +317,7 @@ To give a new hire (or any active user) a starter balance — typical pattern wh
 3. Use the **Adjust** form on their row: type a positive integer (e.g. `5`), add a reason like "onboarding starter pack", click **Adjust**, confirm the dialog.
 4. Both `balance` and `received_total` go up by the amount; a `type='grant'` row is recorded with your admin ID; the user gets a DM from the bot.
 
-Don't use this for ongoing daily participation — the daily-allowance + `:taco:` flow is what makes it visible recognition. Grants are administrative; they don't appear in the activity feed and they don't show up in give/receive analytics by default (only in the "Admin grants" audit query and in reconciliation).
+Don't use this for ongoing daily participation — the daily-allowance + `:taco:` flow is what makes it visible recognition. Grants are administrative; they don't appear in the activity feed and they don't appear in the `given` leaderboard metric (admin grants set `admin_user_id`, not `from_user_id`). The `received` leaderboard agrees with `users.received_total` for the all-time / no-channel view (it reads the cached counter directly); period and channel-filtered views aggregate from `transactions` and net grants in on the receiving side — so admin adjustments and the `zero-balances` reset show up in those filtered analytics too.
 
 ### Manual balance correction
 
