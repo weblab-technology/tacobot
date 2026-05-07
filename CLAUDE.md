@@ -58,6 +58,7 @@ lib/
 
 drizzle/                           Generated migrations (commit them)
 scripts/sync-users.ts              One-shot bootstrap from Slack users.list
+scripts/zero-balances.ts           One-shot GA reset: zero every user's balance via signed grants (DRY_RUN=1 to preview)
 tests/unit/                        Pure-logic tests (parser, format, decide, validate, receiver-verify)
 tests/integration/                 PGlite tests (constraints, execute, redemption, reaction, cron, command-score)
 tests/integration/helpers/db.ts    getDb(), inRollbackTx(), withCleanDb()
@@ -79,6 +80,7 @@ pnpm db:generate         # drizzle-kit generate (after schema edits)
 pnpm db:migrate          # drizzle-kit migrate
 pnpm db:studio           # drizzle-kit studio (web UI)
 pnpm sync-users          # bootstrap users from Slack workspace
+pnpm zero-balances       # one-shot GA reset; needs RESET_ADMIN_SLACK_ID, supports DRY_RUN=1
 ```
 
 CI runs `typecheck && lint && test` on every push and PR. Always run those locally before claiming done.

@@ -280,6 +280,34 @@ curl -X POST "https://tacobot.weblab.technology/api/cron/reset-allowance" \
 
 Returns `{ "updated": <count> }`. Idempotent — running it twice in a day just resets twice (which only matters if someone gave tacos in between, in which case their day starts fresh).
 
+### GA reset: zero everyone's balance
+
+One-shot operation, intended for cutover from beta to general availability when you want every user starting at `balance = 0` without losing the audit trail.
+
+```bash
+RESET_ADMIN_SLACK_ID=U0123ABC \
+RESET_REASON="GA cutover 2026-Q2: zeroing beta balances" \
+DRY_RUN=1 \
+pnpm zero-balances        # preview — prints per-user delta, writes nothing
+```
+
+```bash
+RESET_ADMIN_SLACK_ID=U0123ABC \
+RESET_REASON="GA cutover 2026-Q2: zeroing beta balances" \
+pnpm zero-balances        # apply
+```
+
+What it does (`scripts/zero-balances.ts`):
+
+- Iterates every user. For each one with `balance ≠ 0`, calls `grant(db, { recipientId, amount: -balance, adminId, reason })`.
+- Because `grant()` moves `balance` and `received_total` by the same signed delta, users who already redeemed end up with `received_total > 0` after the reset — that's intentional, the redemptions stay in the ledger.
+- `daily_remaining` is *not* touched. The 00:00 UTC cron handles that — run this script after the cron has fired so the new day's allowance isn't immediately reset.
+- Each user's reset is its own `type='grant'` row attributed to `RESET_ADMIN_SLACK_ID` with the supplied `RESET_REASON` (defaults to "GA reset: zeroing beta balances").
+
+Required env: `RESET_ADMIN_SLACK_ID` (a real Slack user ID — the grant CHECK requires `admin_user_id`). Optional: `DRY_RUN=1`, `RESET_REASON`. The script runs against whatever `POSTGRES_URL` is set; double-check you're pointed at production before dropping `DRY_RUN`.
+
+This is a destructive-feeling operation but every change is a fresh append in `transactions` — no rows are mutated or deleted, and you can audit afterwards via the "Admin grants" query above. To recover from a mistaken zeroing, run a compensating script (or apply per-user `+balance` grants from `/admin/users`).
+
 ### Onboarding a new user with a starter balance
 
 To give a new hire (or any active user) a starter balance — typical pattern when seeding the bot for the first time, or when someone joins mid-quarter and you want them to participate immediately:
