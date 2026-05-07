@@ -17,6 +17,9 @@ tsconfig.tsbuildinfo
 # Vercel
 .vercel/
 
+# DB snapshots from scripts/snapshot-db.ts
+snapshots/
+
 # Testing
 coverage/
 

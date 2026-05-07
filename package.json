@@ -18,7 +18,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "sync-users": "tsx scripts/sync-users.ts",
-    "zero-balances": "tsx scripts/zero-balances.ts"
+    "zero-balances": "tsx --env-file=.env.local scripts/zero-balances.ts",
+    "snapshot-db": "tsx --env-file=.env.local scripts/snapshot-db.ts"
   },
   "dependencies": {
     "@slack/bolt": "^4.0.0",
