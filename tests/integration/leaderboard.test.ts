@@ -231,6 +231,79 @@ test("inactive users are excluded even when they have received tacos", async () 
   });
 });
 
+test("redeemable: ranks active users by current balance, descending", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_A", name: "A", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_B", name: "B", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_C", name: "C", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_ZERO", name: "Zero", dailyAllowance: 5 });
+    await tx.execute(
+      sql`UPDATE users SET balance = 7, received_total = 7 WHERE id = 'U_A'`,
+    );
+    await tx.execute(
+      sql`UPDATE users SET balance = 12, received_total = 12 WHERE id = 'U_B'`,
+    );
+    await tx.execute(
+      sql`UPDATE users SET balance = 3, received_total = 3 WHERE id = 'U_C'`,
+    );
+
+    const rows = await getLeaderboard(tx, {
+      metric: "redeemable",
+      since: null,
+      channel: null,
+    });
+
+    expect(rows).toEqual([
+      { userId: "U_B", total: 12 },
+      { userId: "U_A", total: 7 },
+      { userId: "U_C", total: 3 },
+    ]);
+  });
+});
+
+test("redeemable: excludes inactive users and zero/negative balances", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_GONE", name: "Gone", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_NEG", name: "Neg", dailyAllowance: 5 });
+    await upsertUser(tx, { id: "U_OK", name: "OK", dailyAllowance: 5 });
+    await tx.execute(
+      sql`UPDATE users SET balance = 99, received_total = 99 WHERE id = 'U_GONE'`,
+    );
+    await tx.execute(sql`UPDATE users SET is_active = false WHERE id = 'U_GONE'`);
+    await tx.execute(
+      sql`UPDATE users SET balance = -2, received_total = -2 WHERE id = 'U_NEG'`,
+    );
+    await tx.execute(
+      sql`UPDATE users SET balance = 4, received_total = 4 WHERE id = 'U_OK'`,
+    );
+
+    const rows = await getLeaderboard(tx, {
+      metric: "redeemable",
+      since: null,
+      channel: null,
+    });
+
+    expect(rows).toEqual([{ userId: "U_OK", total: 4 }]);
+  });
+});
+
+test("redeemable: ignores period and channel filters", async () => {
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_A", name: "A", dailyAllowance: 5 });
+    await tx.execute(
+      sql`UPDATE users SET balance = 6, received_total = 6 WHERE id = 'U_A'`,
+    );
+
+    const rows = await getLeaderboard(tx, {
+      metric: "redeemable",
+      since: new Date("2099-01-01T00:00:00Z"),
+      channel: "C_NONEXISTENT",
+    });
+
+    expect(rows).toEqual([{ userId: "U_A", total: 6 }]);
+  });
+});
+
 test("tie-break: equal totals order by user_id ascending", async () => {
   await inRollbackTx(async (tx) => {
     await upsertUser(tx, { id: "U_GIVER", name: "Giver", dailyAllowance: 50 });

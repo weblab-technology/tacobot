@@ -25,6 +25,8 @@ export default function FilterForm({
   const formRef = useRef<HTMLFormElement>(null);
   const submit = () => formRef.current?.requestSubmit();
   const showClear = metric !== "received" || period !== "all" || channel;
+  // Redeemable reads the live balance — period/channel windows don't apply.
+  const periodChannelDisabled = metric === "redeemable";
 
   return (
     <form
@@ -54,7 +56,8 @@ export default function FilterForm({
         name="period"
         defaultValue={period}
         onChange={submit}
-        className="rounded border border-gray-300 px-2 py-1"
+        disabled={periodChannelDisabled}
+        className="rounded border border-gray-300 px-2 py-1 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
       >
         {periodOptions.map((o) => (
           <option key={o.value} value={o.value}>
@@ -69,7 +72,8 @@ export default function FilterForm({
         name="channel"
         defaultValue={channel ?? ""}
         onChange={submit}
-        className="rounded border border-gray-300 px-2 py-1"
+        disabled={periodChannelDisabled}
+        className="rounded border border-gray-300 px-2 py-1 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
       >
         <option value="">All channels</option>
         {channels.map((c) => (

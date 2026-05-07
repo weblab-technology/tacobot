@@ -20,7 +20,8 @@ const SLACK_LINK = (id: string) => `https://slack.com/app_redirect?channel=${id}
 const METRIC_OPTIONS: { value: LeaderboardMetric; label: string }[] = [
   { value: "received", label: "Tacos received" },
   { value: "given", label: "Tacos given" },
-  { value: "combined", label: "Tacos combined" },
+  { value: "combined", label: "Tacos total" },
+  { value: "redeemable", label: "Tacos redeemable" },
 ];
 
 const PERIOD_OPTIONS: { value: LeaderboardPeriod; label: string }[] = [
@@ -37,7 +38,7 @@ type SearchParams = Promise<{
 }>;
 
 function parseMetric(v: string | undefined): LeaderboardMetric {
-  return v === "given" || v === "combined" ? v : "received";
+  return v === "given" || v === "combined" || v === "redeemable" ? v : "received";
 }
 
 function parsePeriod(v: string | undefined): LeaderboardPeriod {

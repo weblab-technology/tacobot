@@ -131,7 +131,7 @@ export async function countReversalsPerGiveGroup(
   return out;
 }
 
-export type LeaderboardMetric = "received" | "given" | "combined";
+export type LeaderboardMetric = "received" | "given" | "combined" | "redeemable";
 
 export type LeaderboardRow = {
   userId: string;
@@ -148,11 +148,18 @@ export type LeaderboardOptions = {
  * Active users ranked by net tacos for the chosen metric/period/channel.
  * Net = sum of give amounts minus sum of reversal amounts whose original
  * give matches the same filters (net-by-give-date semantics).
+ *
+ * `redeemable` is a current-state metric — it reads `users.balance` directly
+ * and ignores the period/channel filters, since balance reflects all-time
+ * receipts net of reversals and redemptions and isn't channel-scoped.
  */
 export async function getLeaderboard(
   db: DbLike,
   opts: LeaderboardOptions,
 ): Promise<LeaderboardRow[]> {
+  if (opts.metric === "redeemable") {
+    return runRedeemable(db);
+  }
   if (opts.metric !== "combined") {
     return runDirectional(db, opts.metric, opts);
   }
@@ -167,6 +174,18 @@ export async function getLeaderboard(
     .filter(([, total]) => total > 0)
     .map(([userId, total]) => ({ userId, total }))
     .sort((a, b) => b.total - a.total || a.userId.localeCompare(b.userId));
+}
+
+async function runRedeemable(db: DbLike): Promise<LeaderboardRow[]> {
+  const rows = await db
+    .select({
+      userId: users.id,
+      total: users.balance,
+    })
+    .from(users)
+    .where(and(eq(users.isActive, true), sql`${users.balance} > 0`))
+    .orderBy(desc(users.balance), asc(users.id));
+  return rows.map((r) => ({ userId: r.userId, total: r.total }));
 }
 
 async function runDirectional(
