@@ -31,6 +31,21 @@ test("upsertUser refreshes name on existing user without resetting counters", as
   });
 });
 
+test("upsertUser reactivates a previously-deactivated user", async () => {
+  // Once a row flipped to is_active=false (sync-users sweep, user_change
+  // deleted=true), every later call from sync-users / team_join / user_change /
+  // lazy paths must restore is_active=true. Otherwise the user is permanently
+  // invisible to the admin /users page.
+  await inRollbackTx(async (tx) => {
+    await upsertUser(tx, { id: "U_DEAD", name: "Old", dailyAllowance: 5 });
+    await tx.update(users).set({ isActive: false }).where(eq(users.id, "U_DEAD"));
+    await upsertUser(tx, { id: "U_DEAD", name: "Resurrected", dailyAllowance: 5 });
+    const [row] = await tx.select().from(users).where(eq(users.id, "U_DEAD"));
+    expect(row.isActive).toBe(true);
+    expect(row.name).toBe("Resurrected");
+  });
+});
+
 afterAll(async () => {
   await closePool();
 });

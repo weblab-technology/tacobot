@@ -4,8 +4,17 @@ import { items, transactions, users } from "./schema";
 import type { DbLike } from "./types";
 
 /**
- * Insert or update a user. On conflict, updates the name and updatedAt timestamp
- * while preserving all counters (receivedTotal, balance, dailyRemaining).
+ * Insert or update a user. On conflict, updates the name and updatedAt
+ * timestamp and reactivates the row (`is_active=true`) while preserving all
+ * counters (receivedTotal, balance, dailyRemaining).
+ *
+ * Reactivation is correct because every caller already vets liveness before
+ * invoking: `sync-users` and the `team_join`/`user_change` handlers skip
+ * deleted users explicitly, and the lazy paths in message/reaction handlers
+ * only fire when a real user is actively giving or receiving. Without this,
+ * once a row flips to `is_active=false` (sync sweep, Slack `deleted=true`
+ * payload), no path ever restores it — the user becomes permanently invisible
+ * to the admin page.
  */
 export async function upsertUser(
   db: DbLike,
@@ -22,6 +31,7 @@ export async function upsertUser(
       target: users.id,
       set: {
         name: input.name,
+        isActive: true,
         updatedAt: sql`now()`,
       },
     });
