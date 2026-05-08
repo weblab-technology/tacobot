@@ -17,7 +17,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
-    "sync-users": "tsx scripts/sync-users.ts",
+    "sync-users": "tsx --env-file=.env.local scripts/sync-users.ts",
     "zero-balances": "tsx --env-file=.env.local scripts/zero-balances.ts",
     "snapshot-db": "tsx --env-file=.env.local scripts/snapshot-db.ts",
     "reset-allowance": "tsx --env-file=.env.local scripts/reset-allowance.ts",
