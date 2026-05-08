@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { asc, desc, eq } from "drizzle-orm";
+import { config } from "@/lib/config";
 import { db } from "@/lib/db/client";
 import { items, users } from "@/lib/db/schema";
 import { deductTacos } from "./actions";
@@ -13,6 +14,7 @@ export const metadata: Metadata = {
 };
 
 export default async function UsersPage() {
+  const adjustEnabled = config.admin.adjustEnabled;
   const [allUsers, activeItems] = await Promise.all([
     db.select().from(users).where(eq(users.isActive, true)).orderBy(desc(users.balance), asc(users.name)),
     db.select({ id: items.id, name: items.name, priceTacos: items.priceTacos })
@@ -30,7 +32,7 @@ export default async function UsersPage() {
             <th className="px-4 py-3">Balance</th>
             <th className="px-4 py-3">Today left</th>
             <th className="px-4 py-3">Redeem</th>
-            <th className="px-4 py-3">Adjust</th>
+            {adjustEnabled && <th className="px-4 py-3">Adjust</th>}
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100 text-sm">
@@ -70,9 +72,11 @@ export default async function UsersPage() {
                   </button>
                 </form>
               </td>
-              <td className="px-4 py-3">
-                <AdjustForm userId={u.id} userName={u.name} />
-              </td>
+              {adjustEnabled && (
+                <td className="px-4 py-3">
+                  <AdjustForm userId={u.id} userName={u.name} />
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
